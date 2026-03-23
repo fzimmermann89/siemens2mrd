@@ -1,11 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, FileUp, FlaskConical, Settings2 } from "lucide-react";
+import { ChevronDown, ChevronRight, PencilLine, Search, SlidersHorizontal, Upload } from "lucide-react";
 
 import "./index.css";
 import { Button } from "./components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
@@ -52,6 +51,7 @@ function App(): React.JSX.Element {
   const [liveStatus, setLiveStatus] = React.useState("");
   const [isBusy, setIsBusy] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [headerFilter, setHeaderFilter] = React.useState("");
   const logRef = React.useRef<HTMLDivElement | null>(null);
   const settingsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const settingsPanelRef = React.useRef<HTMLDivElement | null>(null);
@@ -64,6 +64,7 @@ function App(): React.JSX.Element {
   const xmlAssets = getXmlAssets();
   const xslAssets = getXslAssets();
   const previewMeasurement = inspection && settings ? getPreviewMeasurement(inspection, settings) : null;
+  const deferredHeaderFilter = React.useDeferredValue(headerFilter);
 
   React.useEffect(() => {
     if (!logRef.current) return;
@@ -351,175 +352,175 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-6 md:px-8 md:py-8">
-      <header className="border-b border-border/70 pb-5">
-        <div className="space-y-3">
-          <h1 className="text-[2.4rem] font-semibold leading-none text-foreground md:text-[3.1rem]">siemens to <span className="text-primary">mrd</span></h1>
-          <div className="text-xs text-muted-foreground">
-            Conversion runs fully on-device. No data is sent to a server.
-          </div>
-        </div>
+    <main className="mx-auto flex min-h-screen w-full max-w-[720px] flex-col gap-2 px-6 py-12">
+      <header className="space-y-2 pb-1">
+        <h1 className="text-[28px] font-bold tracking-[-0.03em] text-foreground">
+          siemens to <span className="text-primary">mrd</span>
+        </h1>
+        <p className="text-[13px] font-normal text-[#505367]">
+          Conversion runs fully on-device. No data is sent to a server.
+        </p>
       </header>
 
-      <Card className="overflow-hidden">
-        <CardContent className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_22rem] md:p-6">
-          <label
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              const file = event.dataTransfer.files?.[0];
-              if (file) void handleFile(file);
-            }}
-            className="group relative flex min-h-[21rem] min-w-0 cursor-pointer overflow-hidden rounded-[1.5rem] border border-dashed border-border bg-[linear-gradient(180deg,rgba(12,21,31,0.94),rgba(18,27,40,0.92))] px-6 py-8 transition hover:border-primary/55 hover:bg-[linear-gradient(180deg,rgba(13,24,36,0.96),rgba(19,30,44,0.94))]"
-          >
-            <input
-              type="file"
-              accept=".dat,application/octet-stream"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void handleFile(file);
-              }}
-            />
-            {currentFile && inspection ? (
-              <div className="relative z-10 flex h-full w-full flex-col justify-between">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="rounded-2xl border border-primary/25 bg-primary/10 p-3 text-primary">
-                    <FileUp className="size-6" />
-                  </div>
-                  <div className="rounded-full border border-border/80 bg-black/18 px-3 py-1 text-xs text-muted-foreground">
-                    Click or drop another file
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Loaded file</p>
-                    <p className="max-w-3xl break-words text-xl font-medium text-foreground">{currentFile.name}</p>
-                  </div>
-
-                  <div className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
-                    <InlineInfo label="Size" value={`${formatBigInt(BigInt(currentFile.size))} bytes`} />
-                    <InlineInfo label="Format" value={inspection.format === "vb" ? "VB" : "VD/NX"} />
-                    <InlineInfo label="Measurements" value={String(inspection.measurements.length)} />
-                  </div>
-
-                  <div className="rounded-2xl border border-border/70 bg-black/14 px-4 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Optional Meta MRD</div>
-                        <div className="mt-1 truncate text-sm font-medium text-foreground">
-                          {metaDetails ? metaDetails.file.name : "Use an MRD file to override encoding header and trajectories."}
-                        </div>
-                        {metaDetails ? (
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {metaDetails.acquisitionCount} acquisition(s)
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <label className="cursor-pointer">
-                          <input
-                            type="file"
-                            accept=".mrd,.h5,application/x-hdf"
-                            className="hidden"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (file) void handleMetaFile(file);
-                            }}
-                          />
-                          <span className="inline-flex h-9 items-center rounded-full border border-border/80 px-3 text-xs text-foreground">
-                            {metaDetails ? "Replace Meta" : "Add Meta"}
-                          </span>
-                        </label>
-                        {metaDetails ? (
-                          <Button variant="ghost" className="h-9 rounded-full px-3 text-xs" onClick={clearMetaFile}>
-                            Clear
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="relative z-10 flex h-full w-full flex-col items-center justify-center text-center">
-                <div className="mb-4 rounded-2xl border border-border/70 bg-accent/70 p-4 text-accent-foreground transition group-hover:border-primary/60 group-hover:bg-primary group-hover:text-primary-foreground">
-                  <FileUp className="size-8" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-lg font-medium">Drop a Twix `.dat` file</p>
-                  <p className="text-sm text-muted-foreground">or click to choose a file</p>
-                </div>
-              </div>
-            )}
-          </label>
-
-          <div className="flex min-h-[21rem] min-w-0 flex-col gap-4 rounded-[1.5rem] border border-border/80 bg-muted/25 p-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <FlaskConical className="size-4" />
-                  Conversion
-                </div>
-                <Button
-                  ref={settingsTriggerRef}
-                  variant="outline"
-                  className="h-9 rounded-full px-3 text-xs"
-                  aria-label="Toggle settings"
-                  aria-expanded={settingsOpen}
-                  onClick={() => setSettingsOpen((current) => !current)}
-                >
-                    <Settings2 className="size-4" />
-                    Settings
-                  </Button>
-              </div>
-              <div ref={logRef} className="min-h-[10rem] max-h-[14rem] overflow-y-auto overflow-x-hidden rounded-[1.1rem] bg-black/12 px-3 py-3 text-sm text-muted-foreground">
-                <div className="space-y-1.5">
-                  {logLines.map((line, index) => (
-                    <div key={`${index}-${line}`} className="font-mono text-[12px] leading-5 text-muted-foreground">
-                      {line}
-                    </div>
-                  ))}
-                  {liveStatus ? (
-                    <div className="font-mono text-[12px] leading-5 text-primary">
-                      {liveStatus}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+      {currentFile && inspection ? (
+        <section className="rounded-xl border border-border bg-card p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="truncate text-base font-semibold text-foreground">{currentFile.name}</div>
             </div>
-            <div className="mt-auto">
-              <Button className="h-12 w-full rounded-2xl text-base" onClick={() => void handleConvert()} disabled={isBusy || headerFields.length === 0}>
-                Convert
-              </Button>
+            <label className="shrink-0 cursor-pointer">
+              <input
+                type="file"
+                accept=".dat,application/octet-stream"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleFile(file);
+                }}
+              />
+              <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[12px] text-[#8b8fa3]">
+                Change file
+              </span>
+            </label>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-4">
+            <InlineInfo label="Size" value={formatFileSize(currentFile.size)} />
+            <InlineInfo label="Format" value={inspection.format === "vb" ? "VB" : "VD/NX"} />
+            <InlineInfo label="Measurements" value={String(inspection.measurements.length)} />
+          </div>
+
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">Meta MRD</div>
+                <div className="mt-1 text-sm text-[#8b8fa3]">
+                  {metaDetails ? metaDetails.file.name : "Override header and trajectories"}
+                </div>
+                {metaDetails ? (
+                  <div className="mt-1 text-[11px] text-[#505367]">{metaDetails.acquisitionCount} acquisition(s)</div>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept=".mrd,.h5,application/x-hdf"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void handleMetaFile(file);
+                    }}
+                  />
+                  <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[12px] text-[#8b8fa3]">
+                    {metaDetails ? "Replace" : "Add"}
+                  </span>
+                </label>
+                {metaDetails ? (
+                  <Button variant="ghost" size="sm" className="h-8 px-3 text-[12px]" onClick={clearMetaFile}>
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </section>
+      ) : (
+        <label
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            const file = event.dataTransfer.files?.[0];
+            if (file) void handleFile(file);
+          }}
+          className="cursor-pointer rounded-xl border border-border bg-card px-5 py-12 text-center transition hover:border-[rgba(255,255,255,0.12)]"
+        >
+          <input
+            type="file"
+            accept=".dat,application/octet-stream"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void handleFile(file);
+            }}
+          />
+          <Upload className="mx-auto mb-4 size-5 text-[#505367]" />
+          <div className="text-sm text-[#8b8fa3]">Drop a .dat file or click to browse</div>
+        </label>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Header</CardTitle>
-          <CardDescription>Values are editable.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {headerFields.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-10 text-center text-sm text-muted-foreground">
-              Open a file to populate the header tree.
-            </div>
-          ) : (
-            <HeaderTree
-              fields={headerFields}
-              onFieldChange={(key, value) => {
-                setHeaderFields((current) =>
-                  current.map((entry) => (entry.key === key ? { ...entry, value } : entry))
-                );
-              }}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <section className="rounded-xl border border-[rgba(255,255,255,0.08)] bg-muted p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[15px] font-semibold text-foreground">Conversion</div>
+          </div>
+          <Button
+            ref={settingsTriggerRef}
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-md text-[#505367]"
+            aria-label="Toggle settings"
+            aria-expanded={settingsOpen}
+            title="Settings"
+            onClick={() => setSettingsOpen((current) => !current)}
+          >
+            <SlidersHorizontal className="size-4" />
+          </Button>
+        </div>
+
+        <div
+          ref={logRef}
+          className="log-panel mt-4 max-h-40 overflow-y-auto rounded-lg border border-[rgba(255,255,255,0.04)] bg-[#0a0d12] px-4 py-3 font-mono text-[12px] leading-[1.7] text-muted-foreground"
+        >
+          <div className="space-y-1">
+            {logLines.map((line, index) => (
+              <div key={`${index}-${line}`}>{line}</div>
+            ))}
+            {liveStatus ? <div className="text-foreground">{liveStatus}</div> : null}
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-end border-t border-[rgba(255,255,255,0.03)] pt-4">
+          <Button
+            className="min-w-[140px] px-8"
+            onClick={() => void handleConvert()}
+            disabled={isBusy || headerFields.length === 0}
+          >
+            Convert
+          </Button>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-5">
+        <div className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-foreground">
+          <span>Header</span>
+          <PencilLine className="size-4 text-[#505367]" />
+        </div>
+        <div className="relative mb-3">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#505367]" />
+          <Input
+            value={headerFilter}
+            onChange={(event) => setHeaderFilter(event.target.value)}
+            placeholder="Filter header fields..."
+            className="pl-9"
+          />
+        </div>
+        {headerFields.length === 0 ? (
+          <div className="rounded-lg bg-input px-4 py-10 text-center text-sm text-muted-foreground">
+            Open a file to populate the header tree.
+          </div>
+        ) : (
+          <HeaderTree
+            fields={headerFields}
+            filter={deferredHeaderFilter}
+            onFieldChange={(key, value) => {
+              setHeaderFields((current) =>
+                current.map((entry) => (entry.key === key ? { ...entry, value } : entry))
+              );
+            }}
+          />
+        )}
+      </section>
 
       {settingsOpen
         ? createPortal(
@@ -527,7 +528,7 @@ function App(): React.JSX.Element {
               <div className="absolute inset-0 bg-black/26 backdrop-blur-[2px]" />
               <div
                 ref={settingsPanelRef}
-                className="absolute rounded-[1.35rem] border border-border/80 bg-[linear-gradient(180deg,rgba(17,24,34,0.98),rgba(10,15,23,0.98))] p-5 shadow-[0_26px_80px_-34px_rgba(0,0,0,0.9)]"
+                className="absolute rounded-xl border border-border bg-card p-5"
                 style={{
                   top: `${settingsPosition.top}px`,
                   left: `${settingsPosition.left}px`,
@@ -539,7 +540,7 @@ function App(): React.JSX.Element {
                     <div className="text-sm font-medium text-foreground">Settings</div>
                     <div className="mt-1 text-xs text-muted-foreground">Mapping, measurement selection, and export options.</div>
                   </div>
-                  <Button variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={() => setSettingsOpen(false)}>
+                  <Button variant="ghost" className="h-8 px-3 text-xs" onClick={() => setSettingsOpen(false)}>
                     Close
                   </Button>
                 </div>
@@ -628,8 +629,8 @@ function App(): React.JSX.Element {
 function InlineInfo(props: { label: string; value: string }): React.JSX.Element {
   return (
     <div>
-      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{props.label}</p>
-      <p className="mt-1 text-sm font-medium text-foreground">{props.value}</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">{props.label}</p>
+      <p className="mt-1 text-[15px] font-medium text-foreground">{props.value}</p>
     </div>
   );
 }
@@ -640,7 +641,7 @@ function ToggleRow(props: {
   onCheckedChange: (checked: boolean) => void;
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-input px-3 py-2">
       <Label className="text-sm text-foreground">{props.label}</Label>
       <Switch checked={props.checked} onCheckedChange={props.onCheckedChange} />
     </div>
@@ -658,14 +659,22 @@ interface HeaderTreeNode {
 
 function HeaderTree(props: {
   fields: EditableHeaderField[];
+  filter: string;
   onFieldChange: (key: string, value: string) => void;
 }): React.JSX.Element {
-  const tree = React.useMemo(() => buildHeaderTree(props.fields), [props.fields]);
+  const tree = React.useMemo(() => buildHeaderTree(props.fields, props.filter), [props.fields, props.filter]);
+  const forceOpen = props.filter.trim().length > 0;
   return (
-    <div className="rounded-2xl border border-border/70 bg-muted/16 p-3">
+    <div className="rounded-lg bg-card">
       <div className="space-y-1">
         {tree.children.map((node) => (
-          <HeaderTreeNodeView key={node.id} node={node} depth={0} onFieldChange={props.onFieldChange} />
+          <HeaderTreeNodeView
+            key={node.id}
+            node={node}
+            depth={0}
+            forceOpen={forceOpen}
+            onFieldChange={props.onFieldChange}
+          />
         ))}
       </div>
     </div>
@@ -675,23 +684,78 @@ function HeaderTree(props: {
 function HeaderTreeNodeView(props: {
   node: HeaderTreeNode;
   depth: number;
+  forceOpen: boolean;
   onFieldChange: (key: string, value: string) => void;
 }): React.JSX.Element {
-  const { node, depth, onFieldChange } = props;
+  const { node, depth, forceOpen, onFieldChange } = props;
   const hasChildren = node.children.length > 0;
-  const [open, setOpen] = React.useState(depth < 2);
+  const [open, setOpen] = React.useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [draftValue, setDraftValue] = React.useState(node.field?.value ?? "");
+
+  React.useEffect(() => {
+    setOpen(forceOpen ? true : false);
+  }, [forceOpen]);
+
+  React.useEffect(() => {
+    if (!node.field) return;
+    setDraftValue(node.field.value);
+  }, [node.field?.key, node.field?.value]);
 
   if (!hasChildren && node.field) {
+    const commitEdit = (): void => {
+      setIsEditing(false);
+      if (draftValue !== node.field!.value) {
+        onFieldChange(node.field!.key, draftValue);
+      }
+    };
+    const fieldTextStyle: React.CSSProperties = {
+      fontSize: "13px",
+      lineHeight: "1.2",
+      letterSpacing: "0"
+    };
+
     return (
-      <div className="rounded-xl border border-border/60 bg-black/16 px-3 py-3">
-        <div className="grid gap-3 md:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.15fr)]">
-          <div className="min-w-0" style={{ paddingLeft: `${depth * 1.1}rem` }}>
-            <div className="text-sm font-medium text-foreground">{node.field.label}</div>
-            <div className="mt-1 truncate text-xs text-muted-foreground">{node.field.xmlPath}</div>
+      <div className="group rounded-md px-2 py-2 hover:bg-muted">
+        <div className="grid gap-3 md:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.2fr)]">
+          <div className="flex min-w-0 items-center" style={{ paddingLeft: `${depth * 20}px` }}>
+            <div
+              className="flex min-w-0 items-center gap-2 font-medium text-foreground"
+              style={fieldTextStyle}
+              title={node.field.xmlPath}
+            >
+              <span className="truncate">{node.field.label}</span>
+            </div>
           </div>
-          <div className="space-y-1">
-            <Input value={node.field.value} onChange={(event) => onFieldChange(node.field!.key, event.target.value)} />
-            <div className="truncate text-xs text-muted-foreground">{node.field.source}</div>
+          <div>
+            {isEditing ? (
+              <input
+                autoFocus
+                value={draftValue}
+                onChange={(event) => setDraftValue(event.target.value)}
+                onBlur={commitEdit}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    commitEdit();
+                  } else if (event.key === "Escape") {
+                    setDraftValue(node.field!.value);
+                    setIsEditing(false);
+                  }
+                }}
+                className="block w-full rounded-sm border border-[rgba(255,255,255,0.06)] bg-[#0a0d12] px-2 py-1 font-normal text-foreground outline-none focus:border-[rgba(255,255,255,0.12)]"
+                style={fieldTextStyle}
+              />
+            ) : (
+              <button
+                type="button"
+                className="block w-full rounded-sm px-2 py-1 text-left font-normal text-[#cfd3dd] hover:bg-[rgba(255,255,255,0.03)]"
+                style={fieldTextStyle}
+                onClick={() => setIsEditing(true)}
+                title="Click to edit"
+              >
+                <span className="truncate">{node.field.value || " "}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -699,22 +763,28 @@ function HeaderTreeNodeView(props: {
   }
 
   return (
-    <div className="rounded-xl border border-border/60 bg-black/14">
+    <div className="rounded-md">
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        className="flex h-[30px] w-full items-center justify-between gap-3 rounded-md px-2 text-left hover:bg-muted"
         onClick={() => setOpen((current) => !current)}
       >
-        <div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${depth * 1.1}rem` }}>
-          {open ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}
-          <span className="truncate text-sm font-medium text-foreground">{node.label}</span>
+        <div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${depth * 20}px` }}>
+          {open ? <ChevronDown className="size-4 text-[#505367]" /> : <ChevronRight className="size-4 text-[#505367]" />}
+          <span className="truncate text-[13px] text-foreground">{node.label}</span>
         </div>
-        <span className="text-xs text-muted-foreground">{node.children.length}</span>
+        <span className="min-w-6 text-right text-[11px] tabular-nums text-[#505367]">{node.children.length}</span>
       </button>
       {open ? (
-        <div className="space-y-1 border-t border-border/60 p-2">
+        <div className="space-y-1">
           {node.children.map((child) => (
-            <HeaderTreeNodeView key={child.id} node={child} depth={depth + 1} onFieldChange={onFieldChange} />
+            <HeaderTreeNodeView
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              forceOpen={forceOpen}
+              onFieldChange={onFieldChange}
+            />
           ))}
         </div>
       ) : null}
@@ -722,7 +792,7 @@ function HeaderTreeNodeView(props: {
   );
 }
 
-function buildHeaderTree(fields: EditableHeaderField[]): HeaderTreeNode {
+function buildHeaderTree(fields: EditableHeaderField[], filter: string): HeaderTreeNode {
   const root: HeaderTreeNode = {
     id: "root",
     name: "root",
@@ -732,7 +802,16 @@ function buildHeaderTree(fields: EditableHeaderField[]): HeaderTreeNode {
     field: null
   };
 
-  for (const field of fields) {
+  const normalizedFilter = filter.trim().toLowerCase();
+  const filteredFields = normalizedFilter
+    ? fields.filter((field) =>
+        [field.label, field.xmlPath, field.value, field.source].some((value) =>
+          value.toLowerCase().includes(normalizedFilter)
+        )
+      )
+    : fields;
+
+  for (const field of filteredFields) {
     const segments = field.xmlPath.split("/");
     let current = root;
 
@@ -840,6 +919,14 @@ async function maybePickSaveFileHandle(filename: string): Promise<SaveFileHandle
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 

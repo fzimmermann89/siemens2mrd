@@ -1,23 +1,21 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@500;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 
 :root {
-  --background: oklch(0.16 0.012 255);
-  --foreground: oklch(0.92 0.01 220);
-  --card: oklch(0.2 0.014 250);
-  --card-foreground: oklch(0.94 0.01 220);
-  --muted: oklch(0.24 0.014 248);
-  --muted-foreground: oklch(0.71 0.012 235);
-  --border: oklch(0.33 0.016 238 / 0.78);
-  --input: oklch(0.3 0.014 242);
-  --primary: oklch(0.76 0.115 195);
-  --primary-foreground: oklch(0.17 0.014 250);
-  --accent: oklch(0.28 0.026 218);
-  --accent-foreground: oklch(0.92 0.01 220);
-  --ring: oklch(0.73 0.1 195);
-  --radius: 1.15rem;
-  --panel-shadow: 0 18px 54px -34px rgba(0, 0, 0, 0.8);
-  --surface-glow: rgba(94, 217, 255, 0.06);
+  --background: #0a0e14;
+  --foreground: #e2e4e9;
+  --card: #12161e;
+  --card-foreground: #e2e4e9;
+  --muted: #1a1f2b;
+  --muted-foreground: #8b8fa3;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: #0e1118;
+  --primary: #3ecfb2;
+  --primary-foreground: #0a0e14;
+  --accent: #1a1f2b;
+  --accent-foreground: #e2e4e9;
+  --ring: rgba(62, 207, 178, 0.3);
+  --radius: 0.75rem;
 }
 
 @theme inline {
@@ -53,10 +51,10 @@ html, body, #app {
 body {
   margin: 0;
   background:
-    radial-gradient(circle at 18% 14%, var(--surface-glow), transparent 20%),
-    linear-gradient(180deg, #091018 0%, #060b12 100%);
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.03), transparent 36%),
+    linear-gradient(180deg, #0a0e14 0%, #0b1018 100%);
   color: var(--foreground);
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: "Inter", system-ui, sans-serif;
   letter-spacing: -0.01em;
   position: relative;
   overflow-x: hidden;
@@ -64,28 +62,6 @@ body {
 
 #app {
   isolation: isolate;
-}
-
-body::before,
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-}
-
-body::before {
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
-  background-size: 96px 96px;
-  opacity: 0.18;
-}
-
-body::after {
-  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.065) 1px, transparent 0);
-  background-size: 12px 12px;
-  opacity: 0.025;
 }
 
 button,
@@ -96,13 +72,13 @@ textarea {
 }
 
 h1, h2, h3, h4 {
-  font-family: "Syne", sans-serif;
+  font-family: "Inter", system-ui, sans-serif;
   letter-spacing: -0.03em;
 }
 
 code,
 .font-mono {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
 }
 
 a,
@@ -111,7 +87,31 @@ button {
 }
 
 ::selection {
-  background: rgba(94, 217, 255, 0.26);
+  background: rgba(62, 207, 178, 0.26);
+}
+
+.log-panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) #0a0d12;
+}
+
+.log-panel::-webkit-scrollbar {
+  width: 10px;
+}
+
+.log-panel::-webkit-scrollbar-track {
+  background: #0a0d12;
+  border-radius: 999px;
+}
+
+.log-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid #0a0d12;
+  border-radius: 999px;
+}
+
+.log-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 @keyframes rise-in {
