@@ -12,6 +12,10 @@ The XML and XSL parameter maps come from:
 
 - `siemens_to_ismrmrd/parameter_maps`
 
+Third-party license notices for the bundled upstream components are collected in:
+
+- `THIRD_PARTY_NOTICES.md`
+
 ## Requirements
 
 - Node.js and npm

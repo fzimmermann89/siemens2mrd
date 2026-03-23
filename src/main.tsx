@@ -622,6 +622,47 @@ function App(): React.JSX.Element {
           )
         : null}
 
+      <footer className="pt-4 text-[11px] leading-5 text-[#505367]">
+        <p>
+          Built by{" "}
+          <a
+            href="https://github.com/fzimmermann89"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[#8b8fa3] transition-colors hover:text-foreground"
+          >
+            Felix Zimmermann
+          </a>
+          . Powered by{" "}
+          <a
+            href="https://github.com/ismrmrd/ismrmrd"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[#8b8fa3] transition-colors hover:text-foreground"
+          >
+            ISMRMRD
+          </a>{" "}
+          via Emscripten and the stylesheet files from{" "}
+          <a
+            href="https://github.com/ismrmrd/siemens_to_ismrmrd"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[#8b8fa3] transition-colors hover:text-foreground"
+          >
+            siemens_to_ismrmrd
+          </a>
+          .{" "}
+          <a
+            href="/THIRD_PARTY_NOTICES.md"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[#8b8fa3] transition-colors hover:text-foreground"
+          >
+            Notices
+          </a>
+        </p>
+      </footer>
+
     </main>
   );
 }
