@@ -1,0 +1,13 @@
+{
+  "ismrmrdCommit": "2886c1f4881ddc11b9c99a8890018c703a9216f1",
+  "siemensToIsmrmrdCommit": "055eefc09dfa77fbf11fff85979dea9ef2879ba5",
+  "sources": {
+    "ismrmrd_wasm/CMakeLists.txt": "aaa1e9140a5b8d6043c5e26546f524a1fc4ed0e7bb85ce4e20642d36e2ae6c32",
+    "ismrmrd_wasm/include/ismrmrd/wasm_writer.h": "2654b793aed14182e5e64f59e44f03591e5c0d3fe02189d6cf1b1a84f6ba87df",
+    "ismrmrd_wasm/src/ismrmrd_wasm_writer.c": "ddeb5b91b20ef1260bc30982f27532d22ecb11e0881494d3d1c22e8338a6b302"
+  },
+  "artifacts": {
+    "ismrmrd_wasm/build/ismrmrd_wasm_writer.js": "7f7e8ec4c3bba54a600b3c248befcede263a7dd116c6075a43ae4f7c1afc4fe4",
+    "ismrmrd_wasm/build/ismrmrd_wasm_writer.wasm": "bd857b2e77bfa2846cbd67faccda0152fe069c9a69222eaa47c73a47510caa2f"
+  }
+}

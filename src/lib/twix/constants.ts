@@ -1,0 +1,13 @@
+export const RAID_FILE_HEADER_SIZE = 8;
+export const RAID_FILE_ENTRY_SIZE = 152;
+export const RAID_NAME_FIELD_SIZE = 64;
+export const MAX_RAID_MEASUREMENTS = 256;
+export const BUFFER_NAME_FIELD_LIMIT = 32;
+export const BUFFER_PREVIEW_BYTES = 256;
+export const MDH_DMA_LENGTH_MASK = 0x01ff_ffff;
+export const EVAL_INFO_LAST_SCAN_IN_MEASUREMENT = 0;
+export const EVAL_INFO_SYNCDATA = 5;
+export const COMPLEX_FLOAT32_BYTES = 8;
+export const VB_MDH_SIZE = 128;
+export const VD_SCAN_HEADER_SIZE = 192;
+export const CHANNEL_HEADER_SIZE = 32;
