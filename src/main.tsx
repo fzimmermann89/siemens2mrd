@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, PencilLine, Search, SlidersHorizontal, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, PencilLine, RotateCcw, Search, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 
 import "./index.css";
 import { Button } from "./components/ui/button";
@@ -13,10 +13,15 @@ import {
   applyHeaderFieldEdits,
   buildEditableHeader,
   buildEditableHeaderFromXml,
+  canRestoreFieldToPrimary,
   createDefaultSettings,
   deriveEditedConversionParameters,
   extractEditableFields,
   ensureWaveformInformation,
+  isFieldDeletable,
+  isFieldFromSecondary,
+  isFieldManuallyEdited,
+  mergeHeaderFieldsWithSecondary,
   type HeaderDraft,
   type ConverterSettings,
   type EditableHeaderField
@@ -377,17 +382,19 @@ function App(): React.JSX.Element {
     try {
       const outputName = currentMrdFile.name.replace(/\.(mrd|h5)$/i, "") || "converted";
       const filename = `${outputName}.mrd`;
+      const sourceSnapshot = await snapshotFile(currentMrdFile);
+      const metaSnapshot = metaFile ? await snapshotFile(metaFile) : null;
       const saveHandle = await maybePickSaveFileHandle(filename);
       const headerXml = applyHeaderFieldEdits(currentHeaderDraft.xml, headerFields);
 
-      if (metaFile && metaDetails?.kind === "mrd") {
-        const merged = await mergeIsmrmrdFileWithMeta(currentMrdFile, metaFile, filename, headerXml, saveHandle);
+      if (metaSnapshot && metaDetails?.kind === "mrd") {
+        const merged = await mergeIsmrmrdFileWithMeta(sourceSnapshot, metaSnapshot, filename, headerXml, saveHandle);
         if (!saveHandle && merged) {
           triggerDownload(merged, filename);
         }
         appendLog(`Merged MRD header and trajectories into ${filename}.`);
       } else {
-        const rewritten = await rewriteIsmrmrdFile(currentMrdFile, filename, headerXml, saveHandle);
+        const rewritten = await rewriteIsmrmrdFile(sourceSnapshot, filename, headerXml, saveHandle);
         if (!saveHandle && rewritten) {
           triggerDownload(rewritten, filename);
         }
@@ -472,14 +479,18 @@ function App(): React.JSX.Element {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[720px] flex-col gap-2 px-6 py-12">
       <header className="space-y-2 pb-1">
-        <div className="inline-flex w-fit items-center rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-[#505367]">
-          Alpha
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-[28px] font-bold tracking-[-0.03em] text-foreground">
+            siemens to <span className="text-primary">mrd</span>
+          </h1>
+          <div className="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-[#505367]">
+            Alpha
+          </div>
         </div>
-        <h1 className="text-[28px] font-bold tracking-[-0.03em] text-foreground">
-          siemens to <span className="text-primary">mrd</span>
-        </h1>
         <p className="text-[13px] font-normal text-[#505367]">
-          Converts Siemens raw data to ISMRMRD, supports header editing, and can merge a data MRD with a meta MRD or XML header. Secondary XML replaces header information only; secondary MRD can also override trajectories. Everything runs on-device.
+          Converts Siemens raw data to ISMRMRD, edit header, or merge data and meta information.
+          <br />
+          Everything runs in your browser. No data is sent anywhere!
         </p>
       </header>
 
@@ -518,15 +529,13 @@ function App(): React.JSX.Element {
           </div>
 
           <div className="mt-4 border-t border-border pt-4">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">Secondary MRD</div>
+                <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">Secondary Header</div>
                 <div className="mt-1 text-sm text-[#8b8fa3]">
                   {metaDetails
                     ? metaDetails.file.name
-                    : primaryInputKind === "mrd"
-                      ? "Use a second MRD or XML file to replace any header information it contains. MRD files can also override trajectories"
-                      : "Use an MRD or XML file to replace any available header information. MRD files can also override trajectories"}
+                    : "Use an MRD or XML file to replace header information or trajectories."}
                 </div>
                 {metaDetails ? (
                   <div className="mt-1 text-[11px] text-[#505367]">
@@ -650,7 +659,34 @@ function App(): React.JSX.Element {
             filter={deferredHeaderFilter}
             onFieldChange={(key, value) => {
               setHeaderFields((current) =>
-                current.map((entry) => (entry.key === key ? { ...entry, value } : entry))
+                current.map((entry) => (entry.key === key ? { ...entry, value, isRemoved: false } : entry))
+              );
+            }}
+            onFieldRestore={(key) => {
+              setHeaderFields((current) =>
+                current.map((entry) =>
+                  entry.key === key && entry.primaryValue !== null
+                    ? { ...entry, value: entry.primaryValue, isRemoved: false }
+                    : entry
+                )
+              );
+            }}
+            onToggleFieldRemoved={(key, removed) => {
+              setHeaderFields((current) =>
+                current.map((entry) =>
+                  entry.key === key && isFieldDeletable(entry)
+                    ? { ...entry, isRemoved: removed }
+                    : entry
+                )
+              );
+            }}
+            onToggleNodeRemoved={(xmlPath, removed) => {
+              setHeaderFields((current) =>
+                current.map((entry) =>
+                  isFieldDeletable(entry) && isPathWithinNode(entry.xmlPath, xmlPath)
+                    ? { ...entry, isRemoved: removed }
+                    : entry
+                )
               );
             }}
           />
@@ -837,6 +873,9 @@ function HeaderTree(props: {
   fields: EditableHeaderField[];
   filter: string;
   onFieldChange: (key: string, value: string) => void;
+  onFieldRestore: (key: string) => void;
+  onToggleFieldRemoved: (key: string, removed: boolean) => void;
+  onToggleNodeRemoved: (xmlPath: string, removed: boolean) => void;
 }): React.JSX.Element {
   const tree = React.useMemo(() => buildHeaderTree(props.fields, props.filter), [props.fields, props.filter]);
   const forceOpen = props.filter.trim().length > 0;
@@ -849,7 +888,11 @@ function HeaderTree(props: {
             node={node}
             depth={0}
             forceOpen={forceOpen}
+            allFields={props.fields}
             onFieldChange={props.onFieldChange}
+            onFieldRestore={props.onFieldRestore}
+            onToggleFieldRemoved={props.onToggleFieldRemoved}
+            onToggleNodeRemoved={props.onToggleNodeRemoved}
           />
         ))}
       </div>
@@ -861,13 +904,23 @@ function HeaderTreeNodeView(props: {
   node: HeaderTreeNode;
   depth: number;
   forceOpen: boolean;
+  allFields: EditableHeaderField[];
   onFieldChange: (key: string, value: string) => void;
+  onFieldRestore: (key: string) => void;
+  onToggleFieldRemoved: (key: string, removed: boolean) => void;
+  onToggleNodeRemoved: (xmlPath: string, removed: boolean) => void;
 }): React.JSX.Element {
-  const { node, depth, forceOpen, onFieldChange } = props;
+  const { node, depth, forceOpen, allFields, onFieldChange, onFieldRestore, onToggleFieldRemoved, onToggleNodeRemoved } = props;
   const hasChildren = node.children.length > 0;
   const [open, setOpen] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(node.field?.value ?? "");
+  const descendantFields = React.useMemo(
+    () => allFields.filter((field) => isPathWithinNode(field.xmlPath, node.xmlPath)),
+    [allFields, node.xmlPath]
+  );
+  const nodeCanDelete = descendantFields.length > 0 && descendantFields.every(isFieldDeletable);
+  const nodeRemoved = descendantFields.length > 0 && descendantFields.every((field) => field.isRemoved);
 
   React.useEffect(() => {
     setOpen(forceOpen ? true : false);
@@ -890,6 +943,19 @@ function HeaderTreeNodeView(props: {
       lineHeight: "1.2",
       letterSpacing: "0"
     };
+    const fieldRemoved = node.field.isRemoved;
+    const fieldManual = isFieldManuallyEdited(node.field);
+    const fieldSecondary = isFieldFromSecondary(node.field);
+    const canDelete = isFieldDeletable(node.field);
+    const canRestore = canRestoreFieldToPrimary(node.field);
+    const labelClassName = fieldRemoved ? "truncate line-through text-[#505367]" : "truncate";
+    const valueClassName = fieldRemoved
+      ? "text-[#505367] line-through"
+      : fieldManual
+        ? "text-[#d8b36a]"
+        : fieldSecondary
+          ? "text-[#7ec3ff]"
+          : "text-[#cfd3dd]";
 
     return (
       <div className="group rounded-md px-2 py-2 hover:bg-muted">
@@ -900,10 +966,10 @@ function HeaderTreeNodeView(props: {
               style={fieldTextStyle}
               title={node.field.xmlPath}
             >
-              <span className="truncate">{node.field.label}</span>
+              <span className={labelClassName}>{node.field.label}</span>
             </div>
           </div>
-          <div>
+          <div className="flex items-center gap-1">
             {isEditing ? (
               <input
                 autoFocus
@@ -924,14 +990,38 @@ function HeaderTreeNodeView(props: {
             ) : (
               <button
                 type="button"
-                className="block w-full rounded-sm px-2 py-1 text-left font-normal text-[#cfd3dd] hover:bg-[rgba(255,255,255,0.03)]"
+                className="block w-full rounded-sm px-2 py-1 text-left font-normal hover:bg-[rgba(255,255,255,0.03)]"
                 style={fieldTextStyle}
-                onClick={() => setIsEditing(true)}
+                onClick={() => {
+                  if (!fieldRemoved) {
+                    setIsEditing(true);
+                  }
+                }}
                 title="Click to edit"
               >
-                <span className="truncate">{node.field.value || " "}</span>
+                <span className={`truncate ${valueClassName}`}>{node.field.value || " "}</span>
               </button>
             )}
+            {canRestore ? (
+              <button
+                type="button"
+                className="rounded-sm p-1 text-[#8b8fa3] hover:bg-[rgba(255,255,255,0.03)] hover:text-foreground"
+                title="Restore to primary value"
+                onClick={() => onFieldRestore(node.field!.key)}
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            ) : null}
+            {canDelete ? (
+              <button
+                type="button"
+                className={`rounded-sm p-1 hover:bg-[rgba(255,255,255,0.03)] ${fieldRemoved ? "text-[#d8b36a]" : "text-[#8b8fa3] hover:text-foreground"}`}
+                title={fieldRemoved ? "Restore field" : "Remove field"}
+                onClick={() => onToggleFieldRemoved(node.field!.key, !fieldRemoved)}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -940,17 +1030,34 @@ function HeaderTreeNodeView(props: {
 
   return (
     <div className="rounded-md">
-      <button
-        type="button"
-        className="flex h-[30px] w-full items-center justify-between gap-3 rounded-md px-2 text-left hover:bg-muted"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${depth * 20}px` }}>
-          {open ? <ChevronDown className="size-4 text-[#505367]" /> : <ChevronRight className="size-4 text-[#505367]" />}
-          <span className="truncate text-[13px] text-foreground">{node.label}</span>
+      <div className="flex h-[30px] items-center justify-between gap-3 rounded-md px-2 hover:bg-muted">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={() => setOpen((current) => !current)}
+        >
+          <div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${depth * 20}px` }}>
+            {open ? <ChevronDown className="size-4 text-[#505367]" /> : <ChevronRight className="size-4 text-[#505367]" />}
+            <span className={`truncate text-[13px] ${nodeRemoved ? "text-[#505367] line-through" : "text-foreground"}`}>{node.label}</span>
+          </div>
+        </button>
+        <div className="flex items-center gap-1">
+          {nodeCanDelete ? (
+            <button
+              type="button"
+              className={`rounded-sm p-1 hover:bg-[rgba(255,255,255,0.03)] ${nodeRemoved ? "text-[#d8b36a]" : "text-[#8b8fa3] hover:text-foreground"}`}
+              title={nodeRemoved ? "Restore section" : "Remove section"}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleNodeRemoved(node.xmlPath, !nodeRemoved);
+              }}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          ) : null}
+          <span className="min-w-6 text-right text-[11px] tabular-nums text-[#505367]">{node.children.length}</span>
         </div>
-        <span className="min-w-6 text-right text-[11px] tabular-nums text-[#505367]">{node.children.length}</span>
-      </button>
+      </div>
       {open ? (
         <div className="space-y-1">
           {node.children.map((child) => (
@@ -959,7 +1066,11 @@ function HeaderTreeNodeView(props: {
               node={child}
               depth={depth + 1}
               forceOpen={forceOpen}
+              allFields={allFields}
               onFieldChange={onFieldChange}
+              onFieldRestore={onFieldRestore}
+              onToggleFieldRemoved={onToggleFieldRemoved}
+              onToggleNodeRemoved={onToggleNodeRemoved}
             />
           ))}
         </div>
@@ -1052,20 +1163,29 @@ function getTargetMeasurements(inspection: TwixInspectionResult, settings: Conve
 
 function applyMetaHeaderToDraft(draft: HeaderDraft, metaHeaderXml: string): HeaderDraft {
   const xml = mergeHeaderWithMeta(draft.xml, metaHeaderXml);
+  const mergedFields = extractEditableFields(xml);
+  const secondaryFields = extractEditableFields(metaHeaderXml);
   return {
     ...draft,
     xml,
-    fields: extractEditableFields(xml)
+    fields: mergeHeaderFieldsWithSecondary(draft.fields, mergedFields, secondaryFields)
   };
 }
 
 function buildMrdHeaderDraft(summary: IsmrmrdDatasetSummary, metaDetails: MetaMrdDetails | null): HeaderDraft {
-  const xml = metaDetails ? mergeHeaderWithMeta(summary.headerXml, metaDetails.headerXml) : summary.headerXml;
-  return buildEditableHeaderFromXml(xml);
+  const draft = buildEditableHeaderFromXml(summary.headerXml);
+  if (!metaDetails) {
+    return draft;
+  }
+  return applyMetaHeaderToDraft(draft, metaDetails.headerXml);
 }
 
 function formatMrdSummary(summary: IsmrmrdDatasetSummary): string {
   return `Loaded MRD with ${summary.acquisitionCount} acquisition(s) and ${summary.waveformCount} waveform(s).`;
+}
+
+function isPathWithinNode(fieldPath: string, nodePath: string): boolean {
+  return fieldPath === nodePath || fieldPath.startsWith(`${nodePath}/`);
 }
 
 function hasEditedHeader(headerDraft: HeaderDraft | null, headerFields: EditableHeaderField[]): boolean {
@@ -1090,6 +1210,14 @@ function triggerDownload(blob: Blob, filename: string): void {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+async function snapshotFile(file: File): Promise<File> {
+  const bytes = await file.arrayBuffer();
+  return new File([bytes], file.name, {
+    type: file.type,
+    lastModified: file.lastModified
+  });
 }
 
 type SaveFileHandle = {
