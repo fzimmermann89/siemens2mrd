@@ -60,7 +60,21 @@ export async function buildHeaderDraftDocument(
 
 export function applyHeaderFieldEditsToXml(xml: string, fields: EditableHeaderField[]): string {
   const doc = parseXmlDocument(xml, "apply header field edits");
+  const removed = fields
+    .filter((field) => field.isRemoved)
+    .sort((left, right) => left.xmlPath.length - right.xmlPath.length);
+
+  for (const field of removed) {
+    const element = findElementByPath(doc.documentElement, field.xmlPath);
+    if (element?.parentElement) {
+      element.parentElement.removeChild(element);
+    }
+  }
+
   for (const field of fields) {
+    if (field.isRemoved) {
+      continue;
+    }
     const element = findElementByPath(doc.documentElement, field.xmlPath);
     if (element) {
       element.textContent = field.value;
@@ -241,7 +255,10 @@ function flattenEditableFields(doc: XMLDocument): EditableHeaderField[] {
       section,
       value: text,
       source: xmlPath,
-      xmlPath
+      xmlPath,
+      primaryValue: text,
+      secondaryValue: null,
+      isRemoved: false
     });
   });
   return fields;
