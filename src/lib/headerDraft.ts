@@ -65,6 +65,18 @@ export function applyHeaderFieldEdits(xml: string, fields: EditableHeaderField[]
   return applyHeaderFieldEditsToXml(xml, fields);
 }
 
+export function buildEditableHeaderFromXml(xml: string): HeaderDraft {
+  return {
+    xml,
+    sourceXml: xml,
+    fields: extractEditableFieldsFromXml(xml),
+    parameters: {
+      dwellTimeUs: 0,
+      availableChannels: 0
+    }
+  };
+}
+
 export function ensureWaveformInformation(xml: string): string {
   return ensureWaveformInformationInXml(xml);
 }

@@ -1,8 +1,22 @@
 import type { IsmrmrdAcquisitionLike } from "./converter";
 import type { IsmrmrdMetaAcquisition, IsmrmrdMetaSummary } from "./ismrmrdHdf5";
+import { buildEditableHeaderFromXml } from "./headerDraft";
 
 export interface MetaMrdDetails extends IsmrmrdMetaSummary {
   file: File;
+  kind: "mrd" | "xml";
+}
+
+export async function readSecondaryHeaderFile(file: File): Promise<MetaMrdDetails> {
+  const headerXml = await file.text();
+  const draft = buildEditableHeaderFromXml(headerXml);
+  return {
+    file,
+    kind: "xml",
+    headerXml: draft.xml,
+    acquisitionCount: 0,
+    waveformCount: 0
+  };
 }
 
 export function mergeHeaderWithMeta(baseHeaderXml: string, metaHeaderXml: string): string {
@@ -10,19 +24,18 @@ export function mergeHeaderWithMeta(baseHeaderXml: string, metaHeaderXml: string
   const metaDoc = parseXml(metaHeaderXml, "meta header");
   const baseRoot = requireRoot(baseDoc, "base");
   const metaRoot = requireRoot(metaDoc, "meta");
-  const baseEncodings = getDirectChildrenByLocalName(baseRoot, "encoding");
-  const metaEncodings = getDirectChildrenByLocalName(metaRoot, "encoding");
+  const metaChildren = Array.from(metaRoot.children);
 
-  if (metaEncodings.length === 0) {
-    throw new Error("Meta MRD header does not contain any encoding elements");
+  if (metaChildren.length === 0) {
+    throw new Error("Secondary MRD header does not contain any header elements");
   }
 
-  for (const encoding of baseEncodings) {
-    baseRoot.removeChild(encoding);
-  }
-
-  for (const encoding of metaEncodings) {
-    baseRoot.appendChild(baseDoc.importNode(encoding, true));
+  for (const child of metaChildren) {
+    const baseChildren = getDirectChildrenByLocalName(baseRoot, child.localName);
+    for (const baseChild of baseChildren) {
+      baseRoot.removeChild(baseChild);
+    }
+    baseRoot.appendChild(baseDoc.importNode(child, true));
   }
 
   return serializeXml(baseDoc);
@@ -35,7 +48,7 @@ export function applyMetaTrajectory(
 ): IsmrmrdAcquisitionLike {
   if (acquisition.head.number_of_samples !== metaAcquisition.numberOfSamples) {
     throw new Error(
-      `Meta MRD acquisition ${index + 1} sample count mismatch: data=${acquisition.head.number_of_samples}, meta=${metaAcquisition.numberOfSamples}`
+      `Secondary MRD acquisition ${index + 1} sample count mismatch: data=${acquisition.head.number_of_samples}, meta=${metaAcquisition.numberOfSamples}`
     );
   }
 

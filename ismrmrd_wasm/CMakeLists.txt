@@ -101,5 +101,5 @@ target_link_options(
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s FORCE_FILESYSTEM=1"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['FS','HEAPU8','UTF8ToString','stringToUTF8']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_ismrmrdshim_create_dataset','_ismrmrdshim_open_dataset','_ismrmrdshim_close_dataset','_ismrmrdshim_destroy_dataset','_ismrmrdshim_flush_dataset','_ismrmrdshim_write_header','_ismrmrdshim_read_header','_ismrmrdshim_get_number_of_acquisitions','_ismrmrdshim_append_acquisition','_ismrmrdshim_read_acquisition','_ismrmrdshim_append_waveform','_ismrmrdshim_get_last_error']"
+    "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_ismrmrdshim_create_dataset','_ismrmrdshim_open_dataset','_ismrmrdshim_close_dataset','_ismrmrdshim_destroy_dataset','_ismrmrdshim_flush_dataset','_ismrmrdshim_write_header','_ismrmrdshim_read_header','_ismrmrdshim_get_number_of_acquisitions','_ismrmrdshim_get_number_of_waveforms','_ismrmrdshim_append_acquisition','_ismrmrdshim_read_acquisition','_ismrmrdshim_append_waveform','_ismrmrdshim_copy_dataset_with_header','_ismrmrdshim_copy_dataset_with_meta','_ismrmrdshim_get_last_error']"
 )

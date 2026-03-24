@@ -12,6 +12,7 @@ import { Switch } from "./components/ui/switch";
 import {
   applyHeaderFieldEdits,
   buildEditableHeader,
+  buildEditableHeaderFromXml,
   createDefaultSettings,
   deriveEditedConversionParameters,
   extractEditableFields,
@@ -24,8 +25,12 @@ import { convertMeasurement } from "./lib/converter";
 import {
   createIsmrmrdReader,
   createIsmrmrdWriter,
+  mergeIsmrmrdFileWithMeta,
   preloadHdf5,
-  readIsmrmrdMetaSummary
+  readIsmrmrdDatasetSummary,
+  readIsmrmrdMetaSummary,
+  rewriteIsmrmrdFile,
+  type IsmrmrdDatasetSummary
 } from "./lib/ismrmrdHdf5";
 import {
   getDefaultMappingSelection,
@@ -33,21 +38,25 @@ import {
   getXslAssets,
   type MappingSelection
 } from "./lib/mappings";
-import { applyMetaTrajectory, mergeHeaderWithMeta, type MetaMrdDetails } from "./lib/metaMrd";
+import { applyMetaTrajectory, mergeHeaderWithMeta, readSecondaryHeaderFile, type MetaMrdDetails } from "./lib/metaMrd";
 import { formatBigInt, inspectTwixFile, type TwixInspectionResult, type TwixMeasurementEntry } from "./lib/twix";
+
+type PrimaryInputKind = "twix" | "mrd";
 
 function App(): React.JSX.Element {
   const [currentFile, setCurrentFile] = React.useState<File | null>(null);
+  const [primaryInputKind, setPrimaryInputKind] = React.useState<PrimaryInputKind | null>(null);
   const [metaFile, setMetaFile] = React.useState<File | null>(null);
   const [metaDetails, setMetaDetails] = React.useState<MetaMrdDetails | null>(null);
   const [inspection, setInspection] = React.useState<TwixInspectionResult | null>(null);
+  const [mrdSummary, setMrdSummary] = React.useState<IsmrmrdDatasetSummary | null>(null);
   const [settings, setSettings] = React.useState<ConverterSettings | null>(null);
   const [xmlChoice, setXmlChoice] = React.useState("auto");
   const [xslChoice, setXslChoice] = React.useState("auto");
   const [selection, setSelection] = React.useState<MappingSelection | null>(null);
   const [headerFields, setHeaderFields] = React.useState<EditableHeaderField[]>([]);
   const [headerDraft, setHeaderDraft] = React.useState<HeaderDraft | null>(null);
-  const [logLines, setLogLines] = React.useState<string[]>(["Drop a Siemens Twix .dat file to prepare the conversion."]);
+  const [logLines, setLogLines] = React.useState<string[]>(["Drop a Siemens Twix .dat or an existing .mrd/.h5 file to begin."]);
   const [liveStatus, setLiveStatus] = React.useState("");
   const [isBusy, setIsBusy] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -129,16 +138,44 @@ function App(): React.JSX.Element {
     setLogLines((current) => [...current, line]);
   }
 
+  function canReplaceSecondaryMrd(): boolean {
+    if (primaryInputKind !== "mrd") {
+      return true;
+    }
+    if (!hasEditedHeader(headerDraft, headerFields)) {
+      return true;
+    }
+    return confirmSecondaryMrdChange();
+  }
+
   async function handleFile(file: File): Promise<void> {
     setCurrentFile(file);
     setInspection(null);
+    setMrdSummary(null);
     setHeaderFields([]);
     setHeaderDraft(null);
     setSelection(null);
     setIsBusy(true);
-    resetLog(`Reading header buffers from ${file.name} ...`);
+    resetLog(`Reading ${isMrdLikeFile(file) ? "MRD" : "header buffers from"} ${file.name} ...`);
 
     try {
+      if (isMrdLikeFile(file)) {
+        const summary = await readIsmrmrdDatasetSummary(file);
+        const draft = buildMrdHeaderDraft(summary, metaDetails);
+
+        setPrimaryInputKind("mrd");
+        setInspection(null);
+        setMrdSummary(summary);
+        setSettings(null);
+        setSettingsOpen(false);
+        setSelection(null);
+        setHeaderDraft(draft);
+        setHeaderFields(draft.fields);
+        void preloadHdf5();
+        appendLog(formatMrdSummary(summary));
+        return;
+      }
+
       const nextInspection = await inspectTwixFile(file);
       const nextSettings = createDefaultSettings(nextInspection);
       const measurement = getPreviewMeasurement(nextInspection, nextSettings);
@@ -149,7 +186,9 @@ function App(): React.JSX.Element {
           })
         : null;
 
+      setPrimaryInputKind("twix");
       setInspection(nextInspection);
+      setMrdSummary(null);
       setSettings(nextSettings);
       setSelection(nextSelection);
       if (measurement && nextSelection) {
@@ -173,38 +212,60 @@ function App(): React.JSX.Element {
   }
 
   async function handleMetaFile(file: File): Promise<void> {
+    if (!canReplaceSecondaryMrd()) {
+      return;
+    }
     setIsBusy(true);
-    appendLog(`Reading meta MRD ${file.name} ...`);
+    appendLog(`Reading secondary header file ${file.name} ...`);
 
     try {
-      const summary = await readIsmrmrdMetaSummary(file);
-      const details: MetaMrdDetails = { file, ...summary };
+      const details = isXmlHeaderFile(file)
+        ? await readSecondaryHeaderFile(file)
+        : { file, kind: "mrd" as const, ...(await readIsmrmrdMetaSummary(file)) };
       setMetaFile(file);
       setMetaDetails(details);
-      appendLog(`Loaded meta MRD with ${summary.acquisitionCount} acquisition(s).`);
+      appendLog(
+        details.kind === "xml"
+          ? "Loaded secondary XML header."
+          : `Loaded secondary MRD with ${details.acquisitionCount} acquisition(s).`
+      );
 
-      if (inspection && settings) {
-        await refreshHeader(inspection, settings, xmlChoice, xslChoice, details);
+      if (primaryInputKind === "twix" && inspection && settings) {
+        await refreshTwixHeader(inspection, settings, xmlChoice, xslChoice, details);
+      } else if (primaryInputKind === "mrd" && mrdSummary) {
+        refreshMrdHeader(mrdSummary, details);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      appendLog(`Failed to read meta MRD: ${message}`);
+      appendLog(`Failed to read secondary header file: ${message}`);
     } finally {
       setIsBusy(false);
     }
   }
 
   function clearMetaFile(): void {
+    if (!canReplaceSecondaryMrd()) {
+      return;
+    }
     setMetaFile(null);
     setMetaDetails(null);
-    appendLog("Cleared meta MRD override.");
-    if (inspection && settings) {
-      void refreshHeader(inspection, settings, xmlChoice, xslChoice, null);
+    appendLog("Cleared secondary header file.");
+    if (primaryInputKind === "twix" && inspection && settings) {
+      void refreshTwixHeader(inspection, settings, xmlChoice, xslChoice, null);
+    } else if (primaryInputKind === "mrd" && mrdSummary) {
+      refreshMrdHeader(mrdSummary, null);
     }
   }
 
   async function handleConvert(): Promise<void> {
-    if (!currentFile || !inspection || !settings || !headerDraft || headerFields.length === 0) return;
+    if (!currentFile || !headerDraft || headerFields.length === 0) return;
+
+    if (primaryInputKind === "mrd") {
+      await handleMrdConvert(currentFile, headerDraft);
+      return;
+    }
+
+    if (!inspection || !settings) return;
     setIsBusy(true);
     appendLog("Converting Twix data to ISMRMRD ...");
     setLiveStatus("");
@@ -215,8 +276,8 @@ function App(): React.JSX.Element {
       const filename = `${outputName}.mrd`;
       const saveHandle = await maybePickSaveFileHandle(filename);
       const targets = getTargetMeasurements(inspection, settings);
-      if (metaDetails && targets.length !== 1) {
-        throw new Error("Meta MRD override is currently only supported when converting a single measurement");
+      if (metaDetails?.kind === "mrd" && targets.length !== 1) {
+        throw new Error("Secondary MRD override is currently only supported when converting a single measurement");
       }
       let headerXml = applyHeaderFieldEdits(headerDraft.xml, headerFields);
       if (!settings.skipSyncData) {
@@ -224,7 +285,7 @@ function App(): React.JSX.Element {
       }
       const parameters = deriveEditedConversionParameters(headerDraft.parameters, headerFields);
       writer = await createIsmrmrdWriter(filename, headerXml);
-      metaReader = metaFile ? await createIsmrmrdReader(metaFile) : null;
+      metaReader = metaDetails?.kind === "mrd" && metaFile ? await createIsmrmrdReader(metaFile) : null;
       const activeWriter = writer;
       let lastProgressUpdate = 0;
       let acquisitionCount = 0;
@@ -276,9 +337,9 @@ function App(): React.JSX.Element {
         });
         appendLog(`Measurement ${index + 1}/${targets.length}: complete`);
       }
-      if (metaReader && metaAcquisitionIndex !== metaDetails?.acquisitionCount) {
+      if (metaReader && metaDetails?.kind === "mrd" && metaAcquisitionIndex !== metaDetails.acquisitionCount) {
         throw new Error(
-          `Meta MRD acquisition count mismatch: used ${metaAcquisitionIndex}, meta file contains ${metaDetails?.acquisitionCount ?? 0}`
+          `Secondary MRD acquisition count mismatch: used ${metaAcquisitionIndex}, secondary file contains ${metaDetails.acquisitionCount}`
         );
       }
       setLiveStatus("");
@@ -308,7 +369,47 @@ function App(): React.JSX.Element {
     }
   }
 
-  async function refreshHeader(
+  async function handleMrdConvert(currentMrdFile: File, currentHeaderDraft: HeaderDraft): Promise<void> {
+    setIsBusy(true);
+    appendLog("Rewriting MRD dataset ...");
+    setLiveStatus("");
+
+    try {
+      const outputName = currentMrdFile.name.replace(/\.(mrd|h5)$/i, "") || "converted";
+      const filename = `${outputName}.mrd`;
+      const saveHandle = await maybePickSaveFileHandle(filename);
+      const headerXml = applyHeaderFieldEdits(currentHeaderDraft.xml, headerFields);
+
+      if (metaFile && metaDetails?.kind === "mrd") {
+        const merged = await mergeIsmrmrdFileWithMeta(currentMrdFile, metaFile, filename, headerXml, saveHandle);
+        if (!saveHandle && merged) {
+          triggerDownload(merged, filename);
+        }
+        appendLog(`Merged MRD header and trajectories into ${filename}.`);
+      } else {
+        const rewritten = await rewriteIsmrmrdFile(currentMrdFile, filename, headerXml, saveHandle);
+        if (!saveHandle && rewritten) {
+          triggerDownload(rewritten, filename);
+        }
+        appendLog(
+          metaDetails?.kind === "xml"
+            ? `Merged XML header into ${filename}.`
+            : `Updated MRD header and saved ${filename}.`
+        );
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        appendLog("Save cancelled.");
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      appendLog(`Failed to rewrite MRD: ${message}`);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function refreshTwixHeader(
     nextInspection: TwixInspectionResult,
     nextSettings: ConverterSettings,
     nextXmlChoice: string,
@@ -344,25 +445,45 @@ function App(): React.JSX.Element {
     }
   }
 
+  function refreshMrdHeader(
+    nextSummary: IsmrmrdDatasetSummary,
+    nextMetaDetails: MetaMrdDetails | null = metaDetails
+  ): void {
+    try {
+      const draft = buildMrdHeaderDraft(nextSummary, nextMetaDetails);
+      setHeaderDraft(draft);
+      setHeaderFields(draft.fields);
+      appendLog(formatMrdSummary(nextSummary));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setHeaderDraft(null);
+      setHeaderFields([]);
+      appendLog(`Failed to build MRD header: ${message}`);
+    }
+  }
+
   function updateSettings(patch: Partial<ConverterSettings>): void {
     if (!inspection || !settings) return;
     const nextSettings = { ...settings, ...patch };
     setSettings(nextSettings);
-    void refreshHeader(inspection, nextSettings, xmlChoice, xslChoice);
+    void refreshTwixHeader(inspection, nextSettings, xmlChoice, xslChoice);
   }
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[720px] flex-col gap-2 px-6 py-12">
       <header className="space-y-2 pb-1">
+        <div className="inline-flex w-fit items-center rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-[#505367]">
+          Alpha
+        </div>
         <h1 className="text-[28px] font-bold tracking-[-0.03em] text-foreground">
           siemens to <span className="text-primary">mrd</span>
         </h1>
         <p className="text-[13px] font-normal text-[#505367]">
-          Conversion runs fully on-device. No data is sent to a server.
+          Converts Siemens raw data to ISMRMRD, supports header editing, and can merge a data MRD with a meta MRD or XML header. Secondary XML replaces header information only; secondary MRD can also override trajectories. Everything runs on-device.
         </p>
       </header>
 
-      {currentFile && inspection ? (
+      {currentFile && (inspection || mrdSummary) ? (
         <section className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -371,7 +492,7 @@ function App(): React.JSX.Element {
             <label className="shrink-0 cursor-pointer">
               <input
                 type="file"
-                accept=".dat,application/octet-stream"
+                accept=".dat,.mrd,.h5,application/octet-stream,application/x-hdf"
                 className="hidden"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -386,26 +507,38 @@ function App(): React.JSX.Element {
 
           <div className="mt-4 grid grid-cols-3 gap-4">
             <InlineInfo label="Size" value={formatFileSize(currentFile.size)} />
-            <InlineInfo label="Format" value={inspection.format === "vb" ? "VB" : "VD/NX"} />
-            <InlineInfo label="Measurements" value={String(inspection.measurements.length)} />
+            <InlineInfo
+              label="Format"
+              value={primaryInputKind === "mrd" ? "MRD/HDF5" : inspection?.format === "vb" ? "VB" : "VD/NX"}
+            />
+            <InlineInfo
+              label={primaryInputKind === "mrd" ? "Acquisitions" : "Measurements"}
+              value={primaryInputKind === "mrd" ? String(mrdSummary?.acquisitionCount ?? 0) : String(inspection?.measurements.length ?? 0)}
+            />
           </div>
 
           <div className="mt-4 border-t border-border pt-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">Meta MRD</div>
+                <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">Secondary MRD</div>
                 <div className="mt-1 text-sm text-[#8b8fa3]">
-                  {metaDetails ? metaDetails.file.name : "Override header and trajectories"}
+                  {metaDetails
+                    ? metaDetails.file.name
+                    : primaryInputKind === "mrd"
+                      ? "Use a second MRD or XML file to replace any header information it contains. MRD files can also override trajectories"
+                      : "Use an MRD or XML file to replace any available header information. MRD files can also override trajectories"}
                 </div>
                 {metaDetails ? (
-                  <div className="mt-1 text-[11px] text-[#505367]">{metaDetails.acquisitionCount} acquisition(s)</div>
+                  <div className="mt-1 text-[11px] text-[#505367]">
+                    {metaDetails.kind === "xml" ? "Header only" : `${metaDetails.acquisitionCount} acquisition(s)`}
+                  </div>
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <label className="cursor-pointer">
                   <input
                     type="file"
-                    accept=".mrd,.h5,application/x-hdf"
+                    accept=".mrd,.h5,.xml,application/x-hdf,application/xml,text/xml"
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
@@ -437,7 +570,7 @@ function App(): React.JSX.Element {
         >
           <input
             type="file"
-            accept=".dat,application/octet-stream"
+            accept=".dat,.mrd,.h5,application/octet-stream,application/x-hdf"
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -445,7 +578,7 @@ function App(): React.JSX.Element {
             }}
           />
           <Upload className="mx-auto mb-4 size-5 text-[#505367]" />
-          <div className="text-sm text-[#8b8fa3]">Drop a .dat file or click to browse</div>
+          <div className="text-sm text-[#8b8fa3]">Drop a .dat, .mrd, or .h5 file or click to browse</div>
         </label>
       )}
 
@@ -454,18 +587,20 @@ function App(): React.JSX.Element {
           <div>
             <div className="text-[15px] font-semibold text-foreground">Conversion</div>
           </div>
-          <Button
-            ref={settingsTriggerRef}
-            variant="ghost"
-            size="icon"
-            className="size-8 rounded-md text-[#505367]"
-            aria-label="Toggle settings"
-            aria-expanded={settingsOpen}
-            title="Settings"
-            onClick={() => setSettingsOpen((current) => !current)}
-          >
-            <SlidersHorizontal className="size-4" />
-          </Button>
+          {primaryInputKind === "twix" ? (
+            <Button
+              ref={settingsTriggerRef}
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-md text-[#505367]"
+              aria-label="Toggle settings"
+              aria-expanded={settingsOpen}
+              title="Settings"
+              onClick={() => setSettingsOpen((current) => !current)}
+            >
+              <SlidersHorizontal className="size-4" />
+            </Button>
+          ) : null}
         </div>
 
         <div
@@ -551,7 +686,7 @@ function App(): React.JSX.Element {
                       value={xmlChoice}
                       onValueChange={(value) => {
                         setXmlChoice(value);
-                        if (inspection && settings) void refreshHeader(inspection, settings, value, xslChoice);
+                        if (inspection && settings) void refreshTwixHeader(inspection, settings, value, xslChoice);
                       }}
                     >
                       <SelectTrigger>
@@ -572,7 +707,7 @@ function App(): React.JSX.Element {
                       value={xslChoice}
                       onValueChange={(value) => {
                         setXslChoice(value);
-                        if (inspection && settings) void refreshHeader(inspection, settings, xmlChoice, value);
+                        if (inspection && settings) void refreshTwixHeader(inspection, settings, xmlChoice, value);
                       }}
                     >
                       <SelectTrigger>
@@ -924,6 +1059,28 @@ function applyMetaHeaderToDraft(draft: HeaderDraft, metaHeaderXml: string): Head
   };
 }
 
+function buildMrdHeaderDraft(summary: IsmrmrdDatasetSummary, metaDetails: MetaMrdDetails | null): HeaderDraft {
+  const xml = metaDetails ? mergeHeaderWithMeta(summary.headerXml, metaDetails.headerXml) : summary.headerXml;
+  return buildEditableHeaderFromXml(xml);
+}
+
+function formatMrdSummary(summary: IsmrmrdDatasetSummary): string {
+  return `Loaded MRD with ${summary.acquisitionCount} acquisition(s) and ${summary.waveformCount} waveform(s).`;
+}
+
+function hasEditedHeader(headerDraft: HeaderDraft | null, headerFields: EditableHeaderField[]): boolean {
+  if (!headerDraft || headerFields.length === 0) {
+    return false;
+  }
+  return applyHeaderFieldEdits(headerDraft.xml, headerFields) !== headerDraft.xml;
+}
+
+function confirmSecondaryMrdChange(): boolean {
+  return window.confirm(
+    "Changing the secondary MRD will rebuild the header and discard unsaved header edits. Continue?"
+  );
+}
+
 function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -968,6 +1125,14 @@ function formatFileSize(size: number): string {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isMrdLikeFile(file: File): boolean {
+  return /\.(mrd|h5)$/i.test(file.name) || file.type === "application/x-hdf";
+}
+
+function isXmlHeaderFile(file: File): boolean {
+  return /\.xml$/i.test(file.name) || file.type === "application/xml" || file.type === "text/xml";
 }
 
 

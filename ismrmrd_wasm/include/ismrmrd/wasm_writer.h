@@ -25,6 +25,8 @@ EXPORTISMRMRD int ismrmrdshim_write_header(
 EXPORTISMRMRD char *ismrmrdshim_read_header(ISMRMRD_WasmDatasetWriter *writer);
 EXPORTISMRMRD uint32_t ismrmrdshim_get_number_of_acquisitions(
     ISMRMRD_WasmDatasetWriter *writer);
+EXPORTISMRMRD uint32_t ismrmrdshim_get_number_of_waveforms(
+    ISMRMRD_WasmDatasetWriter *writer);
 EXPORTISMRMRD int ismrmrdshim_append_acquisition(
     ISMRMRD_WasmDatasetWriter *writer,
     const ISMRMRD_AcquisitionHeader *header,
@@ -41,6 +43,20 @@ EXPORTISMRMRD int ismrmrdshim_append_waveform(
     ISMRMRD_WasmDatasetWriter *writer,
     const ISMRMRD_WaveformHeader *header,
     const uint32_t *data);
+EXPORTISMRMRD int ismrmrdshim_copy_dataset_with_header(
+    const char *source_filename,
+    const char *source_groupname,
+    const char *dest_filename,
+    const char *dest_groupname,
+    const char *xmlstring);
+EXPORTISMRMRD int ismrmrdshim_copy_dataset_with_meta(
+    const char *source_filename,
+    const char *source_groupname,
+    const char *meta_filename,
+    const char *meta_groupname,
+    const char *dest_filename,
+    const char *dest_groupname,
+    const char *xmlstring);
 EXPORTISMRMRD const char *ismrmrdshim_get_last_error(void);
 
 #ifdef __cplusplus

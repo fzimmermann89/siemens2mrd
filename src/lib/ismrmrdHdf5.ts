@@ -26,6 +26,7 @@ type IsmrmrdModule = {
   _ismrmrdshim_write_header: (writerPtr: number, xmlPtr: number) => number;
   _ismrmrdshim_read_header: (writerPtr: number) => number;
   _ismrmrdshim_get_number_of_acquisitions: (writerPtr: number) => number;
+  _ismrmrdshim_get_number_of_waveforms: (writerPtr: number) => number;
   _ismrmrdshim_append_acquisition: (writerPtr: number, headerPtr: number, trajPtr: number, dataPtr: number) => number;
   _ismrmrdshim_read_acquisition: (
     writerPtr: number,
@@ -36,16 +37,35 @@ type IsmrmrdModule = {
     trajLengthPtr: number
   ) => number;
   _ismrmrdshim_append_waveform: (writerPtr: number, headerPtr: number, dataPtr: number) => number;
+  _ismrmrdshim_copy_dataset_with_header: (
+    sourceFilenamePtr: number,
+    sourceGroupPtr: number,
+    destFilenamePtr: number,
+    destGroupPtr: number,
+    headerPtr: number
+  ) => number;
+  _ismrmrdshim_copy_dataset_with_meta: (
+    sourceFilenamePtr: number,
+    sourceGroupPtr: number,
+    metaFilenamePtr: number,
+    metaGroupPtr: number,
+    destFilenamePtr: number,
+    destGroupPtr: number,
+    headerPtr: number
+  ) => number;
   _ismrmrdshim_flush_dataset: (writerPtr: number) => number;
   _ismrmrdshim_close_dataset: (writerPtr: number) => number;
   _ismrmrdshim_destroy_dataset: (writerPtr: number) => void;
   _ismrmrdshim_get_last_error: () => number;
 };
 
-export interface IsmrmrdMetaSummary {
+export interface IsmrmrdDatasetSummary {
   headerXml: string;
   acquisitionCount: number;
+  waveformCount: number;
 }
+
+export type IsmrmrdMetaSummary = IsmrmrdDatasetSummary;
 
 export interface IsmrmrdMetaAcquisition {
   numberOfSamples: number;
@@ -87,11 +107,16 @@ export async function createIsmrmrdWriter(filename: string, headerXml: string): 
 }
 
 export async function readIsmrmrdMetaSummary(file: File): Promise<IsmrmrdMetaSummary> {
+  return readIsmrmrdDatasetSummary(file);
+}
+
+export async function readIsmrmrdDatasetSummary(file: File): Promise<IsmrmrdDatasetSummary> {
   const reader = await createIsmrmrdReader(file);
   try {
     return {
       headerXml: reader.readHeaderXml(),
-      acquisitionCount: reader.getAcquisitionCount()
+      acquisitionCount: reader.getAcquisitionCount(),
+      waveformCount: reader.getWaveformCount()
     };
   } finally {
     reader.dispose();
@@ -124,6 +149,64 @@ export async function writeIsmrmrdFile(
     await writer.appendConversion(conversion);
   }
   return writer.finalizeToBlob();
+}
+
+export async function rewriteIsmrmrdFile(
+  sourceFile: File,
+  outputFilename: string,
+  headerXml: string,
+  handle?: SaveFileHandle | null
+): Promise<Blob | void> {
+  const module = await preloadHdf5();
+  const normalizedHeaderXml = normalizeHeaderXml(headerXml);
+  validateHeaderXml(normalizedHeaderXml);
+
+  const sourceRuntimeFilename = createInternalFilename(sourceFile.name.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  const destRuntimeFilename = createInternalFilename(outputFilename);
+  module.FS.writeFile(sourceRuntimeFilename, new Uint8Array(await sourceFile.arrayBuffer()));
+
+  try {
+    copyDatasetWithHeader(module, sourceRuntimeFilename, destRuntimeFilename, normalizedHeaderXml);
+    if (handle) {
+      await saveRuntimeFileToHandle(module, destRuntimeFilename, handle);
+      return;
+    }
+    return runtimeFileToBlob(module, destRuntimeFilename);
+  } finally {
+    cleanupRuntimeFile(module, sourceRuntimeFilename);
+    cleanupRuntimeFile(module, destRuntimeFilename);
+  }
+}
+
+export async function mergeIsmrmrdFileWithMeta(
+  sourceFile: File,
+  metaFile: File,
+  outputFilename: string,
+  headerXml: string,
+  handle?: SaveFileHandle | null
+): Promise<Blob | void> {
+  const module = await preloadHdf5();
+  const normalizedHeaderXml = normalizeHeaderXml(headerXml);
+  validateHeaderXml(normalizedHeaderXml);
+
+  const sourceRuntimeFilename = createInternalFilename(sourceFile.name.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  const metaRuntimeFilename = createInternalFilename(metaFile.name.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  const destRuntimeFilename = createInternalFilename(outputFilename);
+  module.FS.writeFile(sourceRuntimeFilename, new Uint8Array(await sourceFile.arrayBuffer()));
+  module.FS.writeFile(metaRuntimeFilename, new Uint8Array(await metaFile.arrayBuffer()));
+
+  try {
+    copyDatasetWithMeta(module, sourceRuntimeFilename, metaRuntimeFilename, destRuntimeFilename, normalizedHeaderXml);
+    if (handle) {
+      await saveRuntimeFileToHandle(module, destRuntimeFilename, handle);
+      return;
+    }
+    return runtimeFileToBlob(module, destRuntimeFilename);
+  } finally {
+    cleanupRuntimeFile(module, sourceRuntimeFilename);
+    cleanupRuntimeFile(module, metaRuntimeFilename);
+    cleanupRuntimeFile(module, destRuntimeFilename);
+  }
 }
 
 export class IsmrmrdWriter {
@@ -376,6 +459,11 @@ export class IsmrmrdReader {
     return this.module._ismrmrdshim_get_number_of_acquisitions(this.readerPtr) >>> 0;
   }
 
+  getWaveformCount(): number {
+    this.ensureOpen();
+    return this.module._ismrmrdshim_get_number_of_waveforms(this.readerPtr) >>> 0;
+  }
+
   readAcquisition(index: number): IsmrmrdMetaAcquisition {
     this.ensureOpen();
     const headerPtr = this.module._malloc(ACQUISITION_HEADER_BYTES);
@@ -459,6 +547,77 @@ export class IsmrmrdReader {
 function getLastError(module: IsmrmrdModule): string {
   const ptr = module._ismrmrdshim_get_last_error();
   return ptr ? module.UTF8ToString(ptr) : "unknown wasm error";
+}
+
+function copyDatasetWithHeader(
+  module: IsmrmrdModule,
+  sourceRuntimeFilename: string,
+  destRuntimeFilename: string,
+  headerXml: string
+): void {
+  const sourceFilenamePtr = allocString(module, sourceRuntimeFilename);
+  const sourceGroupPtr = allocString(module, GROUP_NAME);
+  const destFilenamePtr = allocString(module, destRuntimeFilename);
+  const destGroupPtr = allocString(module, GROUP_NAME);
+  const headerPtr = allocString(module, headerXml);
+
+  try {
+    const status = module._ismrmrdshim_copy_dataset_with_header(
+      sourceFilenamePtr,
+      sourceGroupPtr,
+      destFilenamePtr,
+      destGroupPtr,
+      headerPtr
+    );
+    if (status !== 0) {
+      throw new Error(`copy dataset failed: ${getLastError(module)}`);
+    }
+  } finally {
+    module._free(sourceFilenamePtr);
+    module._free(sourceGroupPtr);
+    module._free(destFilenamePtr);
+    module._free(destGroupPtr);
+    module._free(headerPtr);
+  }
+}
+
+function copyDatasetWithMeta(
+  module: IsmrmrdModule,
+  sourceRuntimeFilename: string,
+  metaRuntimeFilename: string,
+  destRuntimeFilename: string,
+  headerXml: string
+): void {
+  const sourceFilenamePtr = allocString(module, sourceRuntimeFilename);
+  const sourceGroupPtr = allocString(module, GROUP_NAME);
+  const metaFilenamePtr = allocString(module, metaRuntimeFilename);
+  const metaGroupPtr = allocString(module, GROUP_NAME);
+  const destFilenamePtr = allocString(module, destRuntimeFilename);
+  const destGroupPtr = allocString(module, GROUP_NAME);
+  const headerPtr = allocString(module, headerXml);
+
+  try {
+    const status = module._ismrmrdshim_copy_dataset_with_meta(
+      sourceFilenamePtr,
+      sourceGroupPtr,
+      metaFilenamePtr,
+      metaGroupPtr,
+      destFilenamePtr,
+      destGroupPtr,
+      headerPtr
+    );
+    if (status !== 0) {
+      throw new Error(`copy dataset with meta failed: ${getLastError(module)}`);
+    }
+  } finally {
+    module._free(sourceFilenamePtr);
+    module._free(sourceGroupPtr);
+    module._free(metaFilenamePtr);
+    module._free(metaGroupPtr);
+    module._free(destFilenamePtr);
+    module._free(destGroupPtr);
+    module._free(headerPtr);
+  }
 }
 
 function allocString(module: IsmrmrdModule, value: string): number {
@@ -575,4 +734,43 @@ function validateHeaderXml(headerXml: string): void {
   if (/<parsererror\b/i.test(headerXml)) {
     throw new Error("Refusing to write malformed XML header: parsererror present in serialized XML");
   }
+}
+
+function cleanupRuntimeFile(module: IsmrmrdModule, runtimeFilename: string): void {
+  try {
+    module.FS.unlink(runtimeFilename);
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+async function saveRuntimeFileToHandle(
+  module: IsmrmrdModule,
+  runtimeFilename: string,
+  handle: SaveFileHandle
+): Promise<void> {
+  const writable = await handle.createWritable();
+  const stream = module.FS.open(runtimeFilename, "r");
+  const buffer = new Uint8Array(EXPORT_CHUNK_BYTES);
+  let position = 0;
+
+  try {
+    while (true) {
+      const read = module.FS.read(stream, buffer, 0, buffer.length, position) as number;
+      if (read <= 0) break;
+      await writable.write(buffer.subarray(0, read));
+      position += read;
+    }
+    await writable.close();
+  } catch (error) {
+    await writable.abort?.(error);
+    throw error;
+  } finally {
+    module.FS.close(stream);
+  }
+}
+
+function runtimeFileToBlob(module: IsmrmrdModule, runtimeFilename: string): Blob {
+  const bytes = module.FS.readFile(runtimeFilename, { encoding: "binary" }) as Uint8Array;
+  return new Blob([new Uint8Array(bytes)], { type: "application/x-hdf" });
 }

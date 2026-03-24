@@ -278,6 +278,13 @@ uint32_t ismrmrdshim_get_number_of_acquisitions(ISMRMRD_WasmDatasetWriter *write
     return ismrmrd_get_number_of_acquisitions(&writer->dataset);
 }
 
+uint32_t ismrmrdshim_get_number_of_waveforms(ISMRMRD_WasmDatasetWriter *writer) {
+    if (ismrmrdshim_validate_writer(writer) != ISMRMRD_NOERROR) {
+        return 0;
+    }
+    return ismrmrd_get_number_of_waveforms(&writer->dataset);
+}
+
 int ismrmrdshim_append_acquisition(
     ISMRMRD_WasmDatasetWriter *writer,
     const ISMRMRD_AcquisitionHeader *header,
@@ -443,6 +450,242 @@ int ismrmrdshim_append_waveform(
 
     free(waveform.data);
     return status;
+}
+
+static int ismrmrdshim_copy_waveforms(
+    ISMRMRD_WasmDatasetWriter *source_writer,
+    ISMRMRD_WasmDatasetWriter *dest_writer) {
+    uint32_t waveform_count;
+    uint32_t index;
+
+    waveform_count = ismrmrd_get_number_of_waveforms(&source_writer->dataset);
+    for (index = 0; index < waveform_count; index++) {
+        ISMRMRD_Waveform waveform;
+        int status;
+
+        ismrmrd_init_waveform(&waveform);
+        status = ismrmrd_read_waveform(&source_writer->dataset, index, &waveform);
+        if (status != ISMRMRD_NOERROR) {
+            ismrmrdshim_capture_errors("failed to read waveform");
+            free(waveform.data);
+            return status;
+        }
+
+        status = ismrmrd_append_waveform(&dest_writer->dataset, &waveform);
+        free(waveform.data);
+        if (status != ISMRMRD_NOERROR) {
+            ismrmrdshim_capture_errors("failed to append waveform");
+            return status;
+        }
+    }
+
+    return ISMRMRD_NOERROR;
+}
+
+static int ismrmrdshim_copy_acquisitions(
+    ISMRMRD_WasmDatasetWriter *source_writer,
+    ISMRMRD_WasmDatasetWriter *meta_writer,
+    ISMRMRD_WasmDatasetWriter *dest_writer) {
+    uint32_t acquisition_count;
+    uint32_t index;
+
+    acquisition_count = ismrmrd_get_number_of_acquisitions(&source_writer->dataset);
+    if (meta_writer != NULL) {
+      uint32_t meta_acquisition_count = ismrmrd_get_number_of_acquisitions(&meta_writer->dataset);
+      if (meta_acquisition_count != acquisition_count) {
+          ismrmrdshim_capture_errors("meta dataset acquisition count does not match source dataset");
+          return ISMRMRD_RUNTIMEERROR;
+      }
+    }
+
+    for (index = 0; index < acquisition_count; index++) {
+        ISMRMRD_Acquisition acquisition;
+        int status;
+
+        status = ismrmrd_init_acquisition(&acquisition);
+        if (status != ISMRMRD_NOERROR) {
+            ismrmrdshim_capture_errors("failed to initialize acquisition");
+            return status;
+        }
+
+        status = ismrmrd_read_acquisition(&source_writer->dataset, index, &acquisition);
+        if (status != ISMRMRD_NOERROR) {
+            ismrmrdshim_capture_errors("failed to read acquisition");
+            ismrmrd_cleanup_acquisition(&acquisition);
+            return status;
+        }
+
+        if (meta_writer != NULL) {
+            ISMRMRD_Acquisition meta_acquisition;
+            size_t trajectory_size;
+
+            status = ismrmrd_init_acquisition(&meta_acquisition);
+            if (status != ISMRMRD_NOERROR) {
+                ismrmrdshim_capture_errors("failed to initialize meta acquisition");
+                ismrmrd_cleanup_acquisition(&acquisition);
+                return status;
+            }
+
+            status = ismrmrd_read_acquisition(&meta_writer->dataset, index, &meta_acquisition);
+            if (status != ISMRMRD_NOERROR) {
+                ismrmrdshim_capture_errors("failed to read meta acquisition");
+                ismrmrd_cleanup_acquisition(&meta_acquisition);
+                ismrmrd_cleanup_acquisition(&acquisition);
+                return status;
+            }
+
+            if (acquisition.head.number_of_samples != meta_acquisition.head.number_of_samples) {
+                ismrmrdshim_capture_errors("meta acquisition sample count does not match source acquisition");
+                ismrmrd_cleanup_acquisition(&meta_acquisition);
+                ismrmrd_cleanup_acquisition(&acquisition);
+                return ISMRMRD_RUNTIMEERROR;
+            }
+
+            acquisition.head.trajectory_dimensions = meta_acquisition.head.trajectory_dimensions;
+            status = ismrmrd_make_consistent_acquisition(&acquisition);
+            if (status != ISMRMRD_NOERROR) {
+                ismrmrdshim_capture_errors("failed to resize acquisition trajectory");
+                ismrmrd_cleanup_acquisition(&meta_acquisition);
+                ismrmrd_cleanup_acquisition(&acquisition);
+                return status;
+            }
+
+            trajectory_size = ismrmrd_size_of_acquisition_traj(&meta_acquisition);
+            if (trajectory_size > 0) {
+                memcpy(acquisition.traj, meta_acquisition.traj, trajectory_size);
+            }
+
+            ismrmrd_cleanup_acquisition(&meta_acquisition);
+        }
+
+        status = ismrmrd_append_acquisition(&dest_writer->dataset, &acquisition);
+        ismrmrd_cleanup_acquisition(&acquisition);
+        if (status != ISMRMRD_NOERROR) {
+            ismrmrdshim_capture_errors("failed to append acquisition");
+            return status;
+        }
+    }
+
+    return ISMRMRD_NOERROR;
+}
+
+static int ismrmrdshim_copy_dataset_internal(
+    const char *source_filename,
+    const char *source_groupname,
+    const char *meta_filename,
+    const char *meta_groupname,
+    const char *dest_filename,
+    const char *dest_groupname,
+    const char *xmlstring) {
+    ISMRMRD_WasmDatasetWriter *source_writer = NULL;
+    ISMRMRD_WasmDatasetWriter *meta_writer = NULL;
+    ISMRMRD_WasmDatasetWriter *dest_writer = NULL;
+    char *header_copy = NULL;
+    const char *header_to_write = xmlstring;
+    int status = ISMRMRD_NOERROR;
+
+    ismrmrdshim_clear_last_error();
+
+    source_writer = ismrmrdshim_open_dataset_internal(source_filename, source_groupname, 0);
+    if (source_writer == NULL) {
+        return ISMRMRD_RUNTIMEERROR;
+    }
+
+    if (meta_filename != NULL && meta_groupname != NULL) {
+        meta_writer = ismrmrdshim_open_dataset_internal(meta_filename, meta_groupname, 0);
+        if (meta_writer == NULL) {
+            status = ISMRMRD_RUNTIMEERROR;
+            goto cleanup;
+        }
+    }
+
+    dest_writer = ismrmrdshim_open_dataset_internal(dest_filename, dest_groupname, 1);
+    if (dest_writer == NULL) {
+        status = ISMRMRD_RUNTIMEERROR;
+        goto cleanup;
+    }
+
+    if (header_to_write == NULL || header_to_write[0] == '\0') {
+        if (meta_writer != NULL) {
+            header_copy = ismrmrdshim_read_xml_header(&meta_writer->dataset);
+        } else {
+            header_copy = ismrmrdshim_read_xml_header(&source_writer->dataset);
+        }
+        if (header_copy == NULL) {
+            status = ISMRMRD_RUNTIMEERROR;
+            goto cleanup;
+        }
+        header_to_write = header_copy;
+    }
+
+    status = ismrmrd_write_header(&dest_writer->dataset, header_to_write);
+    if (status != ISMRMRD_NOERROR) {
+        ismrmrdshim_capture_errors("failed to write xml header");
+        goto cleanup;
+    }
+
+    status = ismrmrdshim_copy_acquisitions(source_writer, meta_writer, dest_writer);
+    if (status != ISMRMRD_NOERROR) {
+        goto cleanup;
+    }
+
+    status = ismrmrdshim_copy_waveforms(source_writer, dest_writer);
+    if (status != ISMRMRD_NOERROR) {
+        goto cleanup;
+    }
+
+cleanup:
+    free(header_copy);
+    if (dest_writer != NULL) {
+        if (status == ISMRMRD_NOERROR) {
+            if (ismrmrdshim_close_dataset(dest_writer) != ISMRMRD_NOERROR) {
+                status = ISMRMRD_RUNTIMEERROR;
+            }
+        }
+        ismrmrdshim_destroy_dataset(dest_writer);
+    }
+    if (meta_writer != NULL) {
+        ismrmrdshim_destroy_dataset(meta_writer);
+    }
+    if (source_writer != NULL) {
+        ismrmrdshim_destroy_dataset(source_writer);
+    }
+
+    return status;
+}
+
+int ismrmrdshim_copy_dataset_with_header(
+    const char *source_filename,
+    const char *source_groupname,
+    const char *dest_filename,
+    const char *dest_groupname,
+    const char *xmlstring) {
+    return ismrmrdshim_copy_dataset_internal(
+        source_filename,
+        source_groupname,
+        NULL,
+        NULL,
+        dest_filename,
+        dest_groupname,
+        xmlstring);
+}
+
+int ismrmrdshim_copy_dataset_with_meta(
+    const char *source_filename,
+    const char *source_groupname,
+    const char *meta_filename,
+    const char *meta_groupname,
+    const char *dest_filename,
+    const char *dest_groupname,
+    const char *xmlstring) {
+    return ismrmrdshim_copy_dataset_internal(
+        source_filename,
+        source_groupname,
+        meta_filename,
+        meta_groupname,
+        dest_filename,
+        dest_groupname,
+        xmlstring);
 }
 
 const char *ismrmrdshim_get_last_error(void) {
