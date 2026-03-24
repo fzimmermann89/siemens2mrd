@@ -1,8 +1,7 @@
-import type { ConversionResult, IsmrmrdAcquisitionLike, IsmrmrdWaveformLike } from "./converter";
+import { ACQUISITION_HEADER_BYTES, DEFAULT_GROUP_NAME, WAVEFORM_HEADER_BYTES } from "./ismrmrd/constants";
+import type { ConversionResult, IsmrmrdAcquisitionLike, IsmrmrdWaveformLike } from "./ismrmrd/types";
 
-const GROUP_NAME = "dataset";
-const ACQUISITION_HEADER_BYTES = 340;
-const WAVEFORM_HEADER_BYTES = 40;
+const GROUP_NAME = DEFAULT_GROUP_NAME;
 const EXPORT_CHUNK_BYTES = 1024 * 1024;
 const FLUSH_EVERY_ACQUISITIONS = 512;
 const FLUSH_EVERY_WAVEFORMS = 64;
@@ -65,8 +64,6 @@ export interface IsmrmrdDatasetSummary {
   waveformCount: number;
 }
 
-export type IsmrmrdMetaSummary = IsmrmrdDatasetSummary;
-
 export interface IsmrmrdMetaAcquisition {
   numberOfSamples: number;
   trajectoryDimensions: number;
@@ -106,10 +103,6 @@ export async function createIsmrmrdWriter(filename: string, headerXml: string): 
   return IsmrmrdWriter.create(module, filename, createInternalFilename(filename), normalizedHeaderXml);
 }
 
-export async function readIsmrmrdMetaSummary(file: File): Promise<IsmrmrdMetaSummary> {
-  return readIsmrmrdDatasetSummary(file);
-}
-
 export async function readIsmrmrdDatasetSummary(file: File): Promise<IsmrmrdDatasetSummary> {
   const reader = await createIsmrmrdReader(file);
   try {
@@ -137,18 +130,6 @@ export async function createIsmrmrdReader(file: File): Promise<IsmrmrdReader> {
     }
     throw error;
   }
-}
-
-export async function writeIsmrmrdFile(
-  filename: string,
-  conversions: ConversionResult[],
-  headerXml: string
-): Promise<Blob> {
-  const writer = await createIsmrmrdWriter(filename, headerXml);
-  for (const conversion of conversions) {
-    await writer.appendConversion(conversion);
-  }
-  return writer.finalizeToBlob();
 }
 
 export async function rewriteIsmrmrdFile(
@@ -263,7 +244,7 @@ export class IsmrmrdWriter {
     }
   }
 
-  async appendConversion(conversion: ConversionResult): Promise<void> {
+  async appendConversion(conversion: ConversionResult<unknown>): Promise<void> {
     for (const acquisition of conversion.acquisitions) {
       await this.appendAcquisition(acquisition);
     }

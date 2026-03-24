@@ -1,8 +1,8 @@
-import type { IsmrmrdAcquisitionLike } from "./converter";
-import type { IsmrmrdMetaAcquisition, IsmrmrdMetaSummary } from "./ismrmrdHdf5";
+import type { IsmrmrdAcquisitionLike } from "./ismrmrd/types";
+import type { IsmrmrdDatasetSummary, IsmrmrdMetaAcquisition } from "./ismrmrdHdf5";
 import { buildEditableHeaderFromXml } from "./headerDraft";
 
-export interface MetaMrdDetails extends IsmrmrdMetaSummary {
+export interface MetaMrdDetails extends IsmrmrdDatasetSummary {
   file: File;
   kind: "mrd" | "xml";
 }

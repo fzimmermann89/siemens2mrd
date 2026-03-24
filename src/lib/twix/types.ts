@@ -33,30 +33,6 @@ export interface TwixInspectionResult {
   measurements: TwixMeasurementEntry[];
 }
 
-export interface TwixScanSummary {
-  index: number;
-  offset: bigint;
-  nextOffset: bigint;
-  dmaLength: number;
-  scanCounter: number;
-  timeStamp: number;
-  pmuTimeStamp: number;
-  usedChannels: number;
-  samplesInScan: number;
-  evalInfoMask: readonly [number, number];
-  kind: "acquisition" | "syncdata";
-  isLastScanInMeasurement: boolean;
-  channelIds: number[];
-}
-
-export interface ParsedTwixMeasurement {
-  format: TwixFormat;
-  measurement: TwixMeasurementEntry;
-  startOffset: bigint;
-  endOffset: bigint;
-  scans: TwixScanSummary[];
-}
-
 export interface MdhLike {
   ulFlagsAndDMALength: number;
   lMeasUID: number;
@@ -66,7 +42,18 @@ export interface MdhLike {
   aulEvalInfoMask: [number, number];
   ushSamplesInScan: number;
   ushUsedChannels: number;
+  sLC?: LoopCounters;
+  sCutOff?: CutOff;
+  ushKSpaceCentreColumn?: number;
+  ushCoilSelect?: number;
+  fReadOutOffcentre?: number;
+  ulTimeSinceLastRF?: number;
+  ushKSpaceCentreLineNo?: number;
+  ushKSpaceCentrePartitionNo?: number;
+  aushIceProgramPara?: number[];
+  sSliceData?: SliceData;
   ushChannelId: number;
+  ushPTABPosNeg?: number;
 }
 
 export interface ScanHeaderLike {
@@ -75,11 +62,52 @@ export interface ScanHeaderLike {
   ulScanCounter: number;
   ulTimeStamp: number;
   ulPMUTimeStamp: number;
+  lPTABPosX?: number;
+  lPTABPosY?: number;
+  lPTABPosZ?: number;
   aulEvalInfoMask: [number, number];
   ushSamplesInScan: number;
   ushUsedChannels: number;
+  sLC?: LoopCounters;
+  sCutOff?: CutOff;
+  ushKSpaceCentreColumn?: number;
+  ushCoilSelect?: number;
+  fReadOutOffcentre?: number;
+  ulTimeSinceLastRF?: number;
+  ushKSpaceCentreLineNo?: number;
+  ushKSpaceCentrePartitionNo?: number;
+  sSliceData?: SliceData;
+  aushIceProgramPara?: number[];
 }
 
 export interface ChannelHeaderLike {
+  ulTypeAndChannelLength?: number;
   ulChannelId: number;
+}
+
+export interface LoopCounters {
+  ushLine: number;
+  ushAcquisition: number;
+  ushSlice: number;
+  ushPartition: number;
+  ushEcho: number;
+  ushPhase: number;
+  ushRepetition: number;
+  ushSet: number;
+  ushSeg: number;
+  ushIda: number;
+  ushIdb: number;
+  ushIdc: number;
+  ushIdd: number;
+  ushIde: number;
+}
+
+export interface CutOff {
+  ushPre: number;
+  ushPost: number;
+}
+
+export interface SliceData {
+  position: [number, number, number];
+  quaternion: [number, number, number, number];
 }
