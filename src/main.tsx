@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import { PencilLine, Search, SlidersHorizontal, Upload } from "lucide-react";
+import { Analytics } from "@vercel/analytics/react";
 
 import "./index.css";
 import { Button } from "./components/ui/button";
@@ -979,5 +980,6 @@ if (!container) {
 createRoot(container).render(
   <React.StrictMode>
     <App />
+    <Analytics />
   </React.StrictMode>
 );
