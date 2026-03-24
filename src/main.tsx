@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import { PencilLine, Search, SlidersHorizontal, Upload } from "lucide-react";
+import { Analytics } from "@vercel/analytics/react";
 
 import "./index.css";
 import { Button } from "./components/ui/button";
@@ -474,7 +475,9 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[720px] flex-col gap-2 px-6 py-12">
+    <>
+      <Analytics />
+      <main className="mx-auto flex min-h-screen w-full max-w-[720px] flex-col gap-2 px-6 py-12">
       <header className="space-y-2 pb-1">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-[28px] font-bold tracking-[-0.03em] text-foreground">
@@ -832,6 +835,7 @@ function App(): React.JSX.Element {
       </footer>
 
     </main>
+    </>
   );
 }
 
