@@ -1,8 +1,9 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
-import { PencilLine, Search, SlidersHorizontal, Upload } from "lucide-react";
+import { Download, PencilLine, Search, SlidersHorizontal, Upload } from "lucide-react";
 import { Analytics } from "@vercel/analytics/react";
+import { useRegisterSW } from "virtual:pwa-register/react";
 
 import "./index.css";
 import { Button } from "./components/ui/button";
@@ -46,6 +47,11 @@ import { inspectTwixFile, type TwixInspectionResult, type TwixMeasurementEntry }
 
 type PrimaryInputKind = "twix" | "mrd";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
 function App(): React.JSX.Element {
   const [currentFile, setCurrentFile] = React.useState<File | null>(null);
   const [primaryInputKind, setPrimaryInputKind] = React.useState<PrimaryInputKind | null>(null);
@@ -64,6 +70,7 @@ function App(): React.JSX.Element {
   const [isBusy, setIsBusy] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [headerFilter, setHeaderFilter] = React.useState("");
+  const [installPrompt, setInstallPrompt] = React.useState<BeforeInstallPromptEvent | null>(null);
   const logRef = React.useRef<HTMLDivElement | null>(null);
   const settingsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const settingsPanelRef = React.useRef<HTMLDivElement | null>(null);
@@ -77,11 +84,32 @@ function App(): React.JSX.Element {
   const xslAssets = getXslAssets();
   const previewMeasurement = inspection && settings ? getPreviewMeasurement(inspection, settings) : null;
   const deferredHeaderFilter = React.useDeferredValue(headerFilter);
+  useRegisterSW();
 
   React.useEffect(() => {
     if (!logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines, liveStatus]);
+
+  React.useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event): void => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    const handleAppInstalled = (): void => {
+      setInstallPrompt(null);
+      appendLog("App installed.");
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!settingsOpen) return;
@@ -139,6 +167,13 @@ function App(): React.JSX.Element {
 
   function appendLog(line: string): void {
     setLogLines((current) => [...current, line]);
+  }
+
+  async function handleInstallApp(): Promise<void> {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
   }
 
   function canReplaceSecondaryMrd(): boolean {
@@ -481,9 +516,21 @@ function App(): React.JSX.Element {
           <h1 className="text-[28px] font-bold tracking-[-0.03em] text-foreground">
             siemens to <span className="text-primary">mrd</span>
           </h1>
-          <div className="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-[#505367]">
-            Alpha
-          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-md border border-border text-[#8b8fa3] disabled:cursor-default disabled:opacity-45"
+            title={
+              installPrompt
+                ? "Install app. After the first online load, it can work offline."
+                : "Install app. Available on supported browsers after the app becomes installable."
+            }
+            aria-label="Install app"
+            disabled={!installPrompt}
+            onClick={() => void handleInstallApp()}
+          >
+            <Download className="size-4" />
+          </Button>
         </div>
         <p className="text-[13px] font-normal text-[#505367]">
           Converts Siemens raw data to ISMRMRD, edit header, or merge data and meta information.
@@ -792,35 +839,45 @@ function App(): React.JSX.Element {
         : null}
 
       <footer className="pt-4 text-[11px] leading-5 text-[#505367]">
-        <p>
-          Built by{" "}
+        <p className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1 text-center">
+          <a
+            href="https://github.com/fzimmermann89/siemens2mrd"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex size-6 items-center justify-center rounded-md border border-border text-[#8b8fa3] transition-colors hover:text-foreground"
+            aria-label="Open GitHub repository"
+            title="View source on GitHub"
+          >
+            <GitHubMark className="size-3.5" />
+          </a>
+          <span>built by</span>
           <a
             href="https://github.com/fzimmermann89"
             target="_blank"
             rel="noreferrer"
             className="text-[#8b8fa3] transition-colors hover:text-foreground"
           >
-            Felix Zimmermann
+            Felix F. Zimmermann.
           </a>
-          . Powered by{" "}
+          <span>powered by</span>
           <a
             href="https://github.com/ismrmrd/ismrmrd"
             target="_blank"
             rel="noreferrer"
             className="text-[#8b8fa3] transition-colors hover:text-foreground"
           >
-            ISMRMRD
-          </a>{" "}
-          via Emscripten and the stylesheet files from{" "}
+            ismrmrd
+          </a>
+          <span>via</span>
           <a
-            href="https://github.com/ismrmrd/siemens_to_ismrmrd"
+            href="https://emscripten.org/"
             target="_blank"
             rel="noreferrer"
             className="text-[#8b8fa3] transition-colors hover:text-foreground"
           >
-            siemens_to_ismrmrd
+            emscripten.
           </a>
-          .{" "}
+          <span>{`v${__APP_VERSION__}.`}</span>
           <a
             href="/THIRD_PARTY_NOTICES.md"
             target="_blank"
@@ -855,6 +912,19 @@ function ToggleRow(props: {
       <Label className="text-sm text-foreground">{props.label}</Label>
       <Switch checked={props.checked} onCheckedChange={props.onCheckedChange} />
     </div>
+  );
+}
+
+function GitHubMark(props: { className?: string }): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+      className={props.className}
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8a8.01 8.01 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 4.84c.68 0 1.37.09 2.01.27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
   );
 }
 
