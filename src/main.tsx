@@ -21,6 +21,7 @@ import {
   extractEditableFields,
   ensureWaveformInformation,
   isFieldDeletable,
+  isFieldManuallyEdited,
   mergeHeaderFieldsWithSecondary,
   type HeaderDraft,
   type ConverterSettings,
@@ -184,6 +185,12 @@ function App(): React.JSX.Element {
       return true;
     }
     return confirmSecondaryMrdChange();
+  }
+
+  function getDroppedFile(event: React.DragEvent<HTMLElement>): File | null {
+    const items = Array.from(event.dataTransfer.items ?? []);
+    const itemFile = items.find((item) => item.kind === "file")?.getAsFile();
+    return itemFile ?? event.dataTransfer.files?.[0] ?? null;
   }
 
   async function handleFile(file: File): Promise<void> {
@@ -541,43 +548,73 @@ function App(): React.JSX.Element {
 
       {currentFile && (inspection || mrdSummary) ? (
         <section className="rounded-xl border border-border bg-card p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="truncate text-base font-semibold text-foreground">{currentFile.name}</div>
+          <div
+            className="rounded-lg transition hover:border-[rgba(255,255,255,0.12)]"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              const file = getDroppedFile(event);
+              if (file) void handleFile(file);
+            }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-base font-semibold text-foreground" title={currentFile.name}>
+                  {currentFile.name}
+                </div>
+              </div>
+              <label className="shrink-0 cursor-pointer">
+                <input
+                  type="file"
+                  accept=".dat,.mrd,.h5,application/octet-stream,application/x-hdf"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void handleFile(file);
+                  }}
+                />
+                <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[12px] text-[#8b8fa3]">
+                  Change file
+                </span>
+              </label>
             </div>
-            <label className="shrink-0 cursor-pointer">
-              <input
-                type="file"
-                accept=".dat,.mrd,.h5,application/octet-stream,application/x-hdf"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleFile(file);
-                }}
+
+            <div className="mt-4 grid grid-cols-3 gap-4">
+              <InlineInfo label="Size" value={formatFileSize(currentFile.size)} />
+              <InlineInfo
+                label="Format"
+                value={primaryInputKind === "mrd" ? "MRD/HDF5" : inspection?.format === "vb" ? "VB" : "VD/NX"}
               />
-              <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[12px] text-[#8b8fa3]">
-                Change file
-              </span>
-            </label>
+              <InlineInfo
+                label={primaryInputKind === "mrd" ? "Acquisitions" : "Measurements"}
+                value={
+                  primaryInputKind === "mrd" ? String(mrdSummary?.acquisitionCount ?? 0) : String(inspection?.measurements.length ?? 0)
+                }
+              />
+            </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-4">
-            <InlineInfo label="Size" value={formatFileSize(currentFile.size)} />
-            <InlineInfo
-              label="Format"
-              value={primaryInputKind === "mrd" ? "MRD/HDF5" : inspection?.format === "vb" ? "VB" : "VD/NX"}
-            />
-            <InlineInfo
-              label={primaryInputKind === "mrd" ? "Acquisitions" : "Measurements"}
-              value={primaryInputKind === "mrd" ? String(mrdSummary?.acquisitionCount ?? 0) : String(inspection?.measurements.length ?? 0)}
-            />
-          </div>
-
-          <div className="mt-4 border-t border-border pt-4">
+          <div
+            className="mt-4 border-t border-border pt-4"
+            onDragOverCapture={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onDropCapture={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const file = getDroppedFile(event);
+              if (file && !isXmlHeaderFile(file) && !isMrdLikeFile(file)) {
+                appendLog(`Failed to read secondary header file: unsupported file type "${file.name}"`);
+                return;
+              }
+              if (file) void handleMetaFile(file);
+            }}
+          >
             <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[#505367]">Secondary Header</div>
-                <div className="mt-1 text-sm text-[#8b8fa3]">
+                <div className="mt-1 truncate text-sm text-[#8b8fa3]" title={metaDetails?.file.name}>
                   {metaDetails
                     ? metaDetails.file.name
                     : "Use an MRD or XML file to replace header information or trajectories."}
@@ -617,7 +654,7 @@ function App(): React.JSX.Element {
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
-            const file = event.dataTransfer.files?.[0];
+            const file = getDroppedFile(event);
             if (file) void handleFile(file);
           }}
           className="cursor-pointer rounded-xl border border-border bg-card px-5 py-12 text-center transition hover:border-[rgba(255,255,255,0.12)]"
@@ -970,7 +1007,7 @@ function hasEditedHeader(headerDraft: HeaderDraft | null, headerFields: Editable
   if (!headerDraft || headerFields.length === 0) {
     return false;
   }
-  return applyHeaderFieldEdits(headerDraft.xml, headerFields) !== headerDraft.xml;
+  return headerFields.some((field) => field.isRemoved || isFieldManuallyEdited(field));
 }
 
 function confirmSecondaryMrdChange(): boolean {
