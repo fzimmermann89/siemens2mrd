@@ -54,13 +54,22 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 function App(): React.JSX.Element {
+  const defaultSettings = React.useMemo<ConverterSettings>(
+    () => ({
+      measNum: 1,
+      allMeas: true,
+      skipSyncData: false,
+      bufferAppend: false
+    }),
+    []
+  );
   const [currentFile, setCurrentFile] = React.useState<File | null>(null);
   const [primaryInputKind, setPrimaryInputKind] = React.useState<PrimaryInputKind | null>(null);
   const [metaFile, setMetaFile] = React.useState<File | null>(null);
   const [metaDetails, setMetaDetails] = React.useState<MetaMrdDetails | null>(null);
   const [inspection, setInspection] = React.useState<TwixInspectionResult | null>(null);
   const [mrdSummary, setMrdSummary] = React.useState<IsmrmrdDatasetSummary | null>(null);
-  const [settings, setSettings] = React.useState<ConverterSettings | null>(null);
+  const [settings, setSettings] = React.useState<ConverterSettings>(defaultSettings);
   const [xmlChoice, setXmlChoice] = React.useState("auto");
   const [xslChoice, setXslChoice] = React.useState("auto");
   const [selection, setSelection] = React.useState<MappingSelection | null>(null);
@@ -75,6 +84,7 @@ function App(): React.JSX.Element {
   const logRef = React.useRef<HTMLDivElement | null>(null);
   const settingsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const settingsPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const twixHeaderRefreshIdRef = React.useRef(0);
   const [settingsPosition, setSettingsPosition] = React.useState<{ top: number; left: number; width: number }>({
     top: 0,
     left: 0,
@@ -83,14 +93,22 @@ function App(): React.JSX.Element {
 
   const xmlAssets = getXmlAssets();
   const xslAssets = getXslAssets();
-  const previewMeasurement = inspection && settings ? getPreviewMeasurement(inspection, settings) : null;
+  const previewMeasurement = inspection ? getPreviewMeasurement(inspection, settings) : null;
   const deferredHeaderFilter = React.useDeferredValue(headerFilter);
   useRegisterSW();
+  const twixSettingsAvailable = primaryInputKind !== "mrd";
 
   React.useEffect(() => {
     if (!logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines, liveStatus]);
+
+  React.useEffect(() => {
+    if (primaryInputKind !== "twix" || !inspection) {
+      return;
+    }
+    void refreshTwixHeader(inspection, settings, xmlChoice, xslChoice, metaDetails);
+  }, [primaryInputKind, inspection, settings.measNum, settings.allMeas, settings.bufferAppend, xmlChoice, xslChoice, metaDetails]);
 
   React.useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event): void => {
@@ -135,14 +153,6 @@ function App(): React.JSX.Element {
       });
     };
 
-    const handlePointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (settingsPanelRef.current?.contains(target)) return;
-      if (settingsTriggerRef.current?.contains(target)) return;
-      setSettingsOpen(false);
-    };
-
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key === "Escape") setSettingsOpen(false);
     };
@@ -150,13 +160,11 @@ function App(): React.JSX.Element {
     updateSettingsPosition();
     window.addEventListener("resize", updateSettingsPosition);
     window.addEventListener("scroll", updateSettingsPosition, true);
-    window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("keydown", handleEscape);
 
     return () => {
       window.removeEventListener("resize", updateSettingsPosition);
       window.removeEventListener("scroll", updateSettingsPosition, true);
-      window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("keydown", handleEscape);
     };
   }, [settingsOpen]);
@@ -211,7 +219,6 @@ function App(): React.JSX.Element {
         setPrimaryInputKind("mrd");
         setInspection(null);
         setMrdSummary(summary);
-        setSettings(null);
         setSettingsOpen(false);
         setSelection(null);
         setHeaderDraft(draft);
@@ -222,7 +229,11 @@ function App(): React.JSX.Element {
       }
 
       const nextInspection = await inspectTwixFile(file);
-      const nextSettings = createDefaultSettings(nextInspection);
+      const detectedSettings = createDefaultSettings(nextInspection);
+      const nextSettings: ConverterSettings = {
+        ...settings,
+        measNum: settings.allMeas ? detectedSettings.measNum : settings.measNum
+      };
       const measurement = getPreviewMeasurement(nextInspection, nextSettings);
       const nextSelection = measurement
         ? getDefaultMappingSelection(nextInspection, measurement, {
@@ -236,18 +247,10 @@ function App(): React.JSX.Element {
       setMrdSummary(null);
       setSettings(nextSettings);
       setSelection(nextSelection);
-      if (measurement && nextSelection) {
-        appendLog("Applying XML map and XSLT to build the ISMRMRD header ...");
-        const nextDraft = await buildEditableHeader(nextInspection, measurement, nextSelection, nextSettings);
-        const mergedDraft = metaDetails ? applyMetaHeaderToDraft(nextDraft, metaDetails.headerXml) : nextDraft;
-        setHeaderDraft(mergedDraft);
-        setHeaderFields(mergedDraft.fields);
-      } else {
-        setHeaderDraft(null);
-        setHeaderFields([]);
-      }
+      setHeaderDraft(null);
+      setHeaderFields([]);
       void preloadHdf5();
-      appendLog(`Header parsed. ${nextInspection.measurements.length} measurement(s) found.`);
+      appendLog(`Parsed Twix headers. ${nextInspection.measurements.length} measurement(s) found.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       appendLog(`Failed to inspect ${file.name}: ${message}`);
@@ -275,9 +278,7 @@ function App(): React.JSX.Element {
           : `Loaded secondary MRD with ${details.acquisitionCount} acquisition(s).`
       );
 
-      if (primaryInputKind === "twix" && inspection && settings) {
-        await refreshTwixHeader(inspection, settings, xmlChoice, xslChoice, details);
-      } else if (primaryInputKind === "mrd" && mrdSummary) {
+      if (primaryInputKind === "mrd" && mrdSummary) {
         refreshMrdHeader(mrdSummary, details);
       }
     } catch (error) {
@@ -295,9 +296,7 @@ function App(): React.JSX.Element {
     setMetaFile(null);
     setMetaDetails(null);
     appendLog("Cleared secondary header file.");
-    if (primaryInputKind === "twix" && inspection && settings) {
-      void refreshTwixHeader(inspection, settings, xmlChoice, xslChoice, null);
-    } else if (primaryInputKind === "mrd" && mrdSummary) {
+    if (primaryInputKind === "mrd" && mrdSummary) {
       refreshMrdHeader(mrdSummary, null);
     }
   }
@@ -463,6 +462,8 @@ function App(): React.JSX.Element {
     nextXslChoice: string,
     nextMetaDetails: MetaMrdDetails | null = metaDetails
   ): Promise<void> {
+    const refreshId = twixHeaderRefreshIdRef.current + 1;
+    twixHeaderRefreshIdRef.current = refreshId;
     try {
       const measurement = getPreviewMeasurement(nextInspection, nextSettings);
       const nextSelection = measurement
@@ -472,19 +473,29 @@ function App(): React.JSX.Element {
           })
         : null;
 
-      setSelection(nextSelection);
       if (measurement && nextSelection) {
-        appendLog("Applying XML map and XSLT to build the ISMRMRD header ...");
+        setSelection(nextSelection);
+        appendLog(`Applying XML map ${nextSelection.selectedXml} with XSLT ${nextSelection.selectedXsl} to build the ISMRMRD header ...`);
         const nextDraft = await buildEditableHeader(nextInspection, measurement, nextSelection, nextSettings);
+        if (refreshId !== twixHeaderRefreshIdRef.current) {
+          return;
+        }
         const mergedDraft = nextMetaDetails ? applyMetaHeaderToDraft(nextDraft, nextMetaDetails.headerXml) : nextDraft;
         setHeaderDraft(mergedDraft);
         setHeaderFields(mergedDraft.fields);
         appendLog(`Header parsed. ${nextInspection.measurements.length} measurement(s) found.`);
       } else {
+        if (refreshId !== twixHeaderRefreshIdRef.current) {
+          return;
+        }
+        setSelection(nextSelection);
         setHeaderDraft(null);
         setHeaderFields([]);
       }
     } catch (error) {
+      if (refreshId !== twixHeaderRefreshIdRef.current) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       setHeaderDraft(null);
       setHeaderFields([]);
@@ -510,10 +521,8 @@ function App(): React.JSX.Element {
   }
 
   function updateSettings(patch: Partial<ConverterSettings>): void {
-    if (!inspection || !settings) return;
     const nextSettings = { ...settings, ...patch };
     setSettings(nextSettings);
-    void refreshTwixHeader(inspection, nextSettings, xmlChoice, xslChoice);
   }
 
   return (
@@ -678,20 +687,18 @@ function App(): React.JSX.Element {
           <div>
             <div className="text-[15px] font-semibold text-foreground">Conversion</div>
           </div>
-          {primaryInputKind === "twix" ? (
-            <Button
-              ref={settingsTriggerRef}
-              variant="ghost"
-              size="icon"
-              className="size-8 rounded-md text-[#505367]"
-              aria-label="Toggle settings"
-              aria-expanded={settingsOpen}
-              title="Settings"
-              onClick={() => setSettingsOpen((current) => !current)}
-            >
-              <SlidersHorizontal className="size-4" />
-            </Button>
-          ) : null}
+          <Button
+            ref={settingsTriggerRef}
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-md text-[#505367]"
+            aria-label="Toggle settings"
+            aria-expanded={settingsOpen}
+            title="Settings"
+            onClick={() => setSettingsOpen((current) => !current)}
+          >
+            <SlidersHorizontal className="size-4" />
+          </Button>
         </div>
 
         <div
@@ -778,7 +785,14 @@ function App(): React.JSX.Element {
       {settingsOpen
         ? createPortal(
             <div className="fixed inset-0 z-40">
-              <div className="absolute inset-0 bg-black/26 backdrop-blur-[2px]" />
+              <div
+                className="absolute inset-0 bg-black/26 backdrop-blur-[2px]"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    setSettingsOpen(false);
+                  }
+                }}
+              />
               <div
                 ref={settingsPanelRef}
                 className="absolute rounded-xl border border-border bg-card p-5"
@@ -791,7 +805,6 @@ function App(): React.JSX.Element {
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
                     <div className="text-sm font-medium text-foreground">Settings</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Mapping, measurement selection, and export options.</div>
                   </div>
                   <Button variant="ghost" className="h-8 px-3 text-xs" onClick={() => setSettingsOpen(false)}>
                     Close
@@ -800,20 +813,14 @@ function App(): React.JSX.Element {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>XML map</Label>
-                    <Select
-                      value={xmlChoice}
-                      onValueChange={(value) => {
-                        setXmlChoice(value);
-                        if (inspection && settings) void refreshTwixHeader(inspection, settings, value, xslChoice);
-                      }}
-                    >
+                    <Select value={xmlChoice} onValueChange={setXmlChoice}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="auto">Auto</SelectItem>
                         {xmlAssets.map((asset) => (
-                          <SelectItem key={asset.name} value={asset.name}>{asset.name}</SelectItem>
+                          <SelectItem key={asset.name} value={asset.name}>{formatMappingAssetLabel(asset.name)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -821,20 +828,14 @@ function App(): React.JSX.Element {
 
                   <div className="space-y-2">
                     <Label>XSLT stylesheet</Label>
-                    <Select
-                      value={xslChoice}
-                      onValueChange={(value) => {
-                        setXslChoice(value);
-                        if (inspection && settings) void refreshTwixHeader(inspection, settings, xmlChoice, value);
-                      }}
-                    >
+                    <Select value={xslChoice} onValueChange={setXslChoice}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="auto">Auto</SelectItem>
                         {xslAssets.map((asset) => (
-                          <SelectItem key={asset.name} value={asset.name}>{asset.name}</SelectItem>
+                          <SelectItem key={asset.name} value={asset.name}>{formatMappingAssetLabel(asset.name)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -845,27 +846,30 @@ function App(): React.JSX.Element {
                     <Input
                       type="number"
                       min={1}
-                      value={settings?.measNum ?? 1}
+                      value={settings.measNum}
                       onChange={(event) => updateSettings({ measNum: Number(event.target.value) || 1 })}
-                      disabled={!settings}
+                      disabled={!twixSettingsAvailable || settings.allMeas}
                     />
                   </div>
 
                   <div className="grid gap-3 pt-1">
                     <ToggleRow
                       label="Extract all measurements"
-                      checked={settings?.allMeas ?? false}
+                      checked={settings.allMeas}
                       onCheckedChange={(checked) => updateSettings({ allMeas: checked })}
+                      disabled={!twixSettingsAvailable}
                     />
                     <ToggleRow
                       label="Skip syncdata"
-                      checked={settings?.skipSyncData ?? false}
+                      checked={settings.skipSyncData}
                       onCheckedChange={(checked) => updateSettings({ skipSyncData: checked })}
+                      disabled={primaryInputKind === "mrd"}
                     />
                     <ToggleRow
                       label="Append protocol buffers"
-                      checked={settings?.bufferAppend ?? false}
+                      checked={settings.bufferAppend}
                       onCheckedChange={(checked) => updateSettings({ bufferAppend: checked })}
+                      disabled={primaryInputKind === "mrd"}
                     />
                   </div>
                 </div>
@@ -943,12 +947,18 @@ function ToggleRow(props: {
   label: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-input px-3 py-2">
-      <Label className="text-sm text-foreground">{props.label}</Label>
-      <Switch checked={props.checked} onCheckedChange={props.onCheckedChange} />
-    </div>
+    <button
+      type="button"
+      className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-input px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={props.disabled}
+      onClick={() => props.onCheckedChange(!props.checked)}
+    >
+      <span className="text-sm font-medium text-foreground">{props.label}</span>
+      <Switch checked={props.checked} className="pointer-events-none" aria-hidden="true" />
+    </button>
   );
 }
 
@@ -978,6 +988,10 @@ function getTargetMeasurements(inspection: TwixInspectionResult, settings: Conve
   if (settings.allMeas) return inspection.measurements;
   const preview = getPreviewMeasurement(inspection, settings);
   return preview ? [preview] : [];
+}
+
+function formatMappingAssetLabel(name: string): string {
+  return name.replace(/^IsmrmrdParameterMap_/, "");
 }
 
 function applyMetaHeaderToDraft(draft: HeaderDraft, metaHeaderXml: string): HeaderDraft {

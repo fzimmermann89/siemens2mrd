@@ -1,4 +1,5 @@
 import type { TwixInspectionResult, TwixMeasurementEntry } from "./twix";
+import { getChildNodeByName, getStringValueArray, parseXProtocol } from "./xprotocol";
 
 export interface MappingAsset {
   name: string;
@@ -82,10 +83,18 @@ function detectMeasurementFlavor(
     return "vb";
   }
 
+  const measText = measurement.buffers?.find((buffer) => buffer.name === "Meas")?.text;
+  if (measText) {
+    const parsedFlavor = detectFlavorFromMeasBuffer(measText);
+    if (parsedFlavor) {
+      return parsedFlavor;
+    }
+  }
+
   const searchableText = [
     measurement.protocolName,
     measurement.patientName,
-    ...(measurement.buffers ?? []).flatMap((buffer) => [buffer.name, buffer.preview])
+    ...(measurement.buffers ?? []).flatMap((buffer) => [buffer.name, buffer.preview, buffer.text ?? ""])
   ]
     .join("\n")
     .toUpperCase();
@@ -95,4 +104,38 @@ function detectMeasurementFlavor(
   }
 
   return "vd";
+}
+
+function detectFlavorFromMeasBuffer(measText: string): "nx" | null {
+  try {
+    const xprotocol = parseXProtocol(measText);
+    const baselineString = getFirstNodeValue(
+      xprotocol,
+      "MEAS.sProtConsistencyInfo.tBaselineString",
+      "MEAS.sProtConsistencyInfo.tMeasuredBaselineString"
+    );
+    const softwareVersion = getFirstNodeValue(xprotocol, "Dicom.SoftwareVersions");
+
+    if (baselineString.includes("NXVA") || softwareVersion.includes("SYNGO MR XA")) {
+      return "nx";
+    }
+    return null;
+  } catch {
+    const uppercase = measText.toUpperCase();
+    if (uppercase.includes("NXVA") || uppercase.includes("SYNGO MR XA")) {
+      return "nx";
+    }
+    return null;
+  }
+}
+
+function getFirstNodeValue(xprotocol: ReturnType<typeof parseXProtocol>, ...paths: string[]): string {
+  for (const path of paths) {
+    const node = getChildNodeByName(xprotocol, path);
+    const value = node ? getStringValueArray(node)[0] ?? "" : "";
+    if (value) {
+      return value.toUpperCase();
+    }
+  }
+  return "";
 }
